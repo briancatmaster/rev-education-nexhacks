@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-hero text-ink font-sans;
+}
+
+input::placeholder {
+  color: #9aa6b2;
+}
+
+::selection {
+  background: #d7e4ef;
+}
