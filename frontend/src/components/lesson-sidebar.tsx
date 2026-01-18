@@ -65,7 +65,7 @@ export default function LessonSidebar({ compact = false }: { compact?: boolean }
           <div key={unit.id} className="space-y-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-                Unit {unitIndex + 1}
+                Topic {unitIndex + 1}
               </p>
               <h3 className="text-sm font-semibold text-ink">{unit.title}</h3>
               <p className="text-xs text-muted">{unit.description}</p>

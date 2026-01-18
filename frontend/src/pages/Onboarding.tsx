@@ -85,6 +85,12 @@ export default function OnboardingPage() {
       })
       const data = await res.json()
       setSessionId(data.session_id)
+      window.localStorage.setItem("sessionId", data.session_id)
+      window.localStorage.setItem("centralTopic", centralTopic)
+      window.localStorage.setItem("userId", String(userId))
+      window.localStorage.removeItem("lessonPlan")
+      window.localStorage.removeItem("orderedPrereqs")
+      window.localStorage.removeItem("topicProgress")
       
       // Add central topic as first node
       setNodes([{ label: centralTopic, type: "concept", confidence: 1.0 }])
@@ -196,7 +202,7 @@ export default function OnboardingPage() {
       if (data.success) {
         setNodes(prev => [...prev, ...data.nodes])
         // Navigate to lessons or graph view
-        navigate("/lessons")
+        navigate("/prereqs")
       } else {
         setError(data.error || "Failed to process papers")
       }
@@ -208,7 +214,7 @@ export default function OnboardingPage() {
   }
 
   const handleSkipPapers = () => {
-    navigate("/lessons")
+    navigate("/prereqs")
   }
 
   // Render knowledge graph visualization (simplified)

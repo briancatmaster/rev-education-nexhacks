@@ -9,6 +9,7 @@ import LessonsLayout from './layouts/LessonsLayout'
 
 import HomePage from './pages/Home'
 import OnboardingPage from './pages/Onboarding'
+import PrereqsPage from './pages/Prereqs'
 import LessonsPage from './pages/Lessons'
 import LessonDetailPage from './pages/LessonDetail'
 
@@ -20,6 +21,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route element={<SiteLayout />}>
             <Route path="/" element={<HomePage />} />
             <Route path="/onboarding" element={<OnboardingPage />} />
+            <Route path="/prereqs" element={<PrereqsPage />} />
             <Route element={<LessonsLayout />}>
               <Route path="/lessons" element={<LessonsPage />} />
               <Route path="/lessons/:lessonId" element={<LessonDetailPage />} />

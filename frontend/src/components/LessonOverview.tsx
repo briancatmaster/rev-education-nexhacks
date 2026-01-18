@@ -33,7 +33,7 @@ export default function LessonOverview() {
         </p>
         <div className="mt-5">
           <Button asChild>
-            <Link to="/origin">Build learning origin</Link>
+            <Link to="/onboarding">Build learning origin</Link>
           </Button>
         </div>
       </div>
@@ -50,9 +50,8 @@ export default function LessonOverview() {
           {plan.target}
         </h1>
         <p className="mt-3 text-base text-muted">
-          Built from your background in {plan.background}. We embedded trusted sources,
-          annotated key ideas, and sequenced the material into a lesson flow you can
-          navigate without leaving the platform.
+          Built from your background in {plan.background}. We sequenced the prerequisite
+          topics and will fetch sources for each as you move through the lessons.
         </p>
         {plan.skills?.length ? (
           <div className="mt-4 flex flex-wrap gap-2 text-xs uppercase tracking-[0.2em] text-muted">
@@ -73,7 +72,7 @@ export default function LessonOverview() {
             </Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link to="/origin">Refine learning origin</Link>
+            <Link to="/onboarding">Refine learning origin</Link>
           </Button>
         </div>
       </div>
@@ -82,7 +81,7 @@ export default function LessonOverview() {
         {plan.units.map((unit, index) => (
           <Card key={unit.id} className="bg-white/85">
             <CardHeader>
-              <Badge>Unit {index + 1}</Badge>
+              <Badge>Topic {index + 1}</Badge>
               <CardTitle className="mt-4">{unit.title}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted">
