@@ -4,10 +4,13 @@
 
 :root {
   color-scheme: light;
+  --font-newsreader: 'Archivo Black', sans-serif;
+  --font-spline: 'IBM Plex Sans', system-ui, sans-serif;
 }
 
 body {
   @apply bg-hero text-ink font-sans;
+  font-family: var(--font-spline);
 }
 
 input::placeholder {

@@ -1,7 +1,4 @@
-"use client"
-
-import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { Link, useLocation } from "react-router-dom"
 import { useEffect, useMemo, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -15,7 +12,7 @@ const lessonTypeLabel = {
 }
 
 export default function LessonSidebar({ compact = false }: { compact?: boolean }) {
-  const pathname = usePathname()
+  const location = useLocation()
   const [plan, setPlan] = useState<LessonPlan | null>(null)
 
   useEffect(() => {
@@ -31,9 +28,9 @@ export default function LessonSidebar({ compact = false }: { compact?: boolean }
 
   const activeLessonId = useMemo(() => {
     if (!plan) return null
-    const parts = pathname.split("/").filter(Boolean)
+    const parts = location.pathname.split("/").filter(Boolean)
     return parts[parts.length - 1] === "lessons" ? plan.units[0]?.lessons[0]?.id : parts.at(-1)
-  }, [pathname, plan])
+  }, [location.pathname, plan])
 
   const containerClass = compact
     ? "w-full overflow-y-auto rounded-2xl border border-peach/60 bg-paper/80 p-4"
@@ -79,7 +76,7 @@ export default function LessonSidebar({ compact = false }: { compact?: boolean }
                 return (
                   <Link
                     key={lesson.id}
-                    href={`/lessons/${lesson.id}`}
+                    to={`/lessons/${lesson.id}`}
                     className={`flex items-center justify-between rounded-xl border px-3 py-2 text-sm transition ${
                       isActive
                         ? "border-ink bg-white shadow-float"

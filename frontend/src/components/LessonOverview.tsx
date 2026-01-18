@@ -1,6 +1,4 @@
-"use client"
-
-import Link from "next/link"
+import { Link } from "react-router-dom"
 import { useEffect, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -35,7 +33,7 @@ export default function LessonOverview() {
         </p>
         <div className="mt-5">
           <Button asChild>
-            <Link href="/origin">Build learning origin</Link>
+            <Link to="/origin">Build learning origin</Link>
           </Button>
         </div>
       </div>
@@ -70,12 +68,12 @@ export default function LessonOverview() {
         ) : null}
         <div className="mt-5 flex flex-wrap gap-3">
           <Button asChild>
-            <Link href={`/lessons/${primaryUnit?.lessons[0]?.id ?? "lesson-1"}`}>
+            <Link to={`/lessons/${primaryUnit?.lessons[0]?.id ?? "lesson-1"}`}>
               Start first lesson
             </Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link href="/origin">Refine learning origin</Link>
+            <Link to="/origin">Refine learning origin</Link>
           </Button>
         </div>
       </div>
@@ -93,7 +91,7 @@ export default function LessonOverview() {
                 {unit.lessons.map((lesson) => (
                   <Link
                     key={lesson.id}
-                    href={`/lessons/${lesson.id}`}
+                    to={`/lessons/${lesson.id}`}
                     className="flex items-center justify-between rounded-xl border border-peach/50 bg-white/70 px-3 py-2 text-sm text-ink hover:border-ink/40"
                   >
                     <span>{lesson.title}</span>

@@ -1,8 +1,8 @@
-import Link from "next/link"
+import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import SchoolCarousel from "@/components/school-carousel"
 
-export default function Home() {
+export default function HomePage() {
   return (
     <main className="relative min-h-screen overflow-hidden bg-hero px-[8vw] py-8 text-ink sm:py-10 flex flex-col">
       <div className="pointer-events-none absolute inset-0">
@@ -21,7 +21,7 @@ export default function Home() {
             exists so learning stays rigorous without leaving the platform.
           </p>
           <div className="pt-4">
-            <Link href="/origin">
+            <Link to="/onboarding">
               <Button size="lg">Begin learning</Button>
             </Link>
           </div>

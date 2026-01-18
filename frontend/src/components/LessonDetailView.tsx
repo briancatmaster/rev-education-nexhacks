@@ -1,8 +1,5 @@
-"use client"
-
 import { useMemo } from "react"
-import { useParams } from "next/navigation"
-import Link from "next/link"
+import { useParams, Link } from "react-router-dom"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,7 +13,7 @@ const typeCopy: Record<Lesson["type"], string> = {
   lab: "Hands-on lab",
 }
 
-export default function LessonDetail() {
+export default function LessonDetailView() {
   const params = useParams<{ lessonId: string }>()
   const stored =
     typeof window !== "undefined" ? window.localStorage.getItem("lessonPlan") : null
@@ -49,7 +46,7 @@ export default function LessonDetail() {
         </p>
         <div className="mt-4">
           <Button asChild>
-            <Link href="/origin">Build learning origin</Link>
+            <Link to="/origin">Build learning origin</Link>
           </Button>
         </div>
       </div>
@@ -85,8 +82,8 @@ export default function LessonDetail() {
               Source excerpt
             </p>
             <p className="mt-2 text-ink">
-              “The curvature of a manifold provides a compact way to describe how local
-              geometry deviates from Euclidean space.”
+              "The curvature of a manifold provides a compact way to describe how local
+              geometry deviates from Euclidean space."
             </p>
           </div>
         </CardContent>

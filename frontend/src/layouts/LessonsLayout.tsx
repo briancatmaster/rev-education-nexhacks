@@ -1,8 +1,7 @@
-import type { ReactNode } from "react"
+import { Outlet } from 'react-router-dom'
+import LessonSidebar from '@/components/lesson-sidebar'
 
-import LessonSidebar from "@/components/lesson-sidebar"
-
-export default function LessonsLayout({ children }: { children: ReactNode }) {
+export default function LessonsLayout() {
   return (
     <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-6xl gap-6 px-[6vw] py-10 lg:px-[8vw]">
       <div className="hidden w-[280px] shrink-0 lg:block">
@@ -12,7 +11,7 @@ export default function LessonsLayout({ children }: { children: ReactNode }) {
         <div className="mb-6 lg:hidden">
           <LessonSidebar compact />
         </div>
-        {children}
+        <Outlet />
       </div>
     </div>
   )

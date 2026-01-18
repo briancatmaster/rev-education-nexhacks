@@ -1,7 +1,4 @@
-"use client"
-
 import { useEffect, useRef, useState } from "react"
-import Image from "next/image"
 
 const TOP_SCHOOLS = [
   { name: "MIT", logo: "/logos/mit.png" },
@@ -52,7 +49,7 @@ export default function SchoolCarousel() {
               key={`${school.name}-${index}`}
               className="flex-shrink-0 flex items-center justify-center h-16 w-28 grayscale opacity-70 hover:grayscale-0 hover:opacity-100 transition-all"
             >
-              <Image
+              <img
                 src={school.logo}
                 alt={school.name}
                 width={112}
