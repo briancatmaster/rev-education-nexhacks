@@ -1,1 +1,0 @@
-self.__NEXT_FONT_MANIFEST="{\"pages\":{},\"app\":{\"/home/briancatmaster/rev-learn-nexhacks/rev-learn-app/app/layout\":[\"static/media/982ceffe7b733b3b-s.p.woff2\",\"static/media/26d4368bf94c0ec4-s.p.woff2\"]},\"appUsingSizeAdjust\":true,\"pagesUsingSizeAdjust\":false}"
