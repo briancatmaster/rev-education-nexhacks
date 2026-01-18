@@ -15,8 +15,8 @@ const ibmPlexSans = IBM_Plex_Sans({
 })
 
 export const metadata: Metadata = {
-  title: "NexHacks Learning",
-  description: "LLM-augmented learning plans that translate new topics into your native expertise.",
+  title: "arXlearn",
+  description: "PhD level learning in half the time. LLM-augmented learning plans that translate new topics into your native expertise.",
 }
 
 export default function RootLayout({

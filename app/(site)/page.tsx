@@ -12,7 +12,7 @@ import {
 export default function Home() {
   return (
     <TooltipProvider>
-      <main className="relative min-h-screen overflow-hidden bg-hero px-[8vw] py-16 text-ink sm:py-20">
+      <main className="relative min-h-screen overflow-hidden bg-hero px-[8vw] py-8 text-ink sm:py-10">
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -top-28 right-[-8%] h-72 w-72 rounded-full bg-cobalt/20 blur-[120px]" />
           <div className="absolute bottom-[-18%] left-[-10%] h-96 w-96 rounded-full bg-lime/35 blur-[140px]" />
@@ -24,13 +24,14 @@ export default function Home() {
         <section className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-6">
             <div className="flex items-center gap-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.4em] text-cobalt">
-                NexHacks Learning
+              <p className="text-xs font-semibold text-cobalt">
+                arXlearn
               </p>
               <span className="h-px flex-1 bg-peach/80" />
             </div>
+            <p className="text-lg font-medium text-ink/80">PhD level learning in half the time</p>
             <h1 className="font-serif text-4xl leading-tight sm:text-6xl">
-              Curate the world’s best research into a lesson built for your mind.
+              Curate the world's best research into a lesson built for your mind.
             </h1>
             <p className="text-lg leading-relaxed text-muted">
               We ingest MIT OpenCourseWare, peer-reviewed papers, and problem sets, then

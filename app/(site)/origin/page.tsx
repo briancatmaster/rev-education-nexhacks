@@ -12,7 +12,7 @@ export default function OriginPage() {
             Build a learning origin that captures your expertise.
           </h1>
           <p className="text-base text-muted">
-            NexHacks doesn’t replace teachers. We assemble the best existing materials
+            arXlearn doesn't replace teachers. We assemble the best existing materials
             and embed them into a guided flow. Your origin tells us which sources to
             prioritize and how to translate new topics into your language.
           </p>

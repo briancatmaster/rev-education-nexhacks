@@ -8,3 +8,5 @@ FETCH_HEAD
 backend/.venv
 backend/**/__pycache__/
 backend/**/*.pyc
+.next/
+.next

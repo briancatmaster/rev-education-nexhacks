@@ -60,7 +60,7 @@ export default function LessonDetail() {
         <CardContent className="space-y-4 text-sm text-muted">
           <p>
             This lesson pulls from embedded sources and guides you through the concepts
-            with in-context highlights. Everything stays inside the NexHacks interface.
+            with in-context highlights. Everything stays inside the arXlearn interface.
           </p>
           <div className="rounded-2xl border border-peach/60 bg-white/70 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">

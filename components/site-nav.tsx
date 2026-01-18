@@ -14,13 +14,13 @@ export default function SiteNav() {
       <div className="mx-auto flex max-w-6xl items-center justify-between px-[8vw] py-4">
         <div className="flex items-center gap-4">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-ink/10 bg-white shadow-float">
-            <span className="text-xl font-black text-ink">N</span>
+            <span className="text-xl font-black text-ink">a</span>
           </div>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.4em] text-cobalt">
-              NexHacks Learning
+            <p className="text-xs font-semibold text-cobalt">
+              arXlearn
             </p>
-            <p className="text-xs text-muted">Research-grade learning, embedded</p>
+            <p className="text-xs text-muted">PhD level learning in half the time</p>
           </div>
         </div>
 
