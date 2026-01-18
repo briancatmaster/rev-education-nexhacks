@@ -197,6 +197,16 @@ CONSTRAINTS:
     return result.get("nodes", [])
 
 
+async def generate_single_paper_nodes(paper_title: str) -> List[dict]:
+    """Lightweight Gemini call for a single paper - generates 3 key concepts from title only."""
+    prompt = f"""From paper title "{paper_title}", extract 3 key concepts.
+Return JSON only: {{"nodes":[{{"label":"1-2 words","type":"concept|method|theory|tool","mastery_estimate":0.7}}]}}"""
+
+    response_text = await call_gemini(prompt)
+    result = extract_json_from_response(response_text)
+    return result.get("nodes", [])
+
+
 # ============ API Endpoints ============
 
 @app.post("/api/user/new", response_model=UserResponse)
@@ -366,6 +376,65 @@ async def submit_papers(request: PapersRequest):
         return NodesResponse(success=True, nodes=[KnowledgeNode(**n) for n in nodes])
         
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/profile/paper-file", response_model=NodesResponse)
+async def upload_paper_file(
+    session_id: str = Form(...),
+    user_id: int = Form(...),
+    title: str = Form(None),
+    file: UploadFile = File(...)
+):
+    """Upload a paper file (PDF) and generate knowledge nodes. Fast - uses title only."""
+    import asyncio
+    
+    try:
+        # Read file and get title immediately
+        file_bytes = await file.read()
+        paper_title = title or (file.filename.replace(".pdf", "").replace("_", " ") if file.filename else "Uploaded Paper")
+        
+        # Prepare file path
+        file_ext = Path(file.filename).suffix if file.filename else ".pdf"
+        file_id = str(uuid.uuid4())
+        file_path = f"{user_id}/{file_id}{file_ext}"
+        
+        # Run storage upload in background (don't wait)
+        def upload_to_storage():
+            supabase.storage.from_("papers").upload(file_path, file_bytes, {
+                "content-type": file.content_type or "application/pdf"
+            })
+        
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, upload_to_storage)
+        
+        # Store paper record (fast DB insert)
+        supabase.table("user_papers").insert({
+            "user_id": user_id,
+            "session_id": session_id,
+            "title": paper_title,
+            "file_url": file_path,
+            "is_llm_generated": False
+        }).execute()
+        
+        # Lightweight Gemini call - just title, 3 nodes
+        nodes = await generate_single_paper_nodes(paper_title)
+        
+        # Store nodes (minimal inserts)
+        for node in nodes:
+            supabase.table("knowledge_nodes").insert({
+                "session_id": session_id,
+                "label": node.get("label"),
+                "type": node.get("type"),
+                "mastery_estimate": node.get("mastery_estimate"),
+                "is_llm_generated": True
+            }).execute()
+        
+        return NodesResponse(success=True, nodes=[KnowledgeNode(**n) for n in nodes])
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

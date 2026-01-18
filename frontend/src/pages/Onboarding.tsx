@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
+import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
 
 type KnowledgeNode = {
@@ -18,6 +19,145 @@ type KnowledgeNode = {
 type Scene = "topic" | "background" | "papers"
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
+
+// Predefined decorative nodes for the background
+const DECORATIVE_NODES = [
+  { label: "Neurophysiology", x: 8, y: 12, z: 1, color: "blue" },
+  { label: "Cognitive Neuroscience", x: 25, y: 8, z: 2, color: "green" },
+  { label: "Brain Function", x: 15, y: 35, z: 1, color: "gray" },
+  { label: "The importance of sleep on the brain", x: 5, y: 55, z: 3, color: "blue" },
+  { label: "Memory Formation", x: 35, y: 22, z: 2, color: "green" },
+  { label: "Neural Plasticity", x: 12, y: 75, z: 1, color: "gray" },
+  { label: "Synaptic Transmission", x: 42, y: 45, z: 3, color: "blue" },
+  { label: "Cortical Mapping", x: 28, y: 65, z: 2, color: "green" },
+  { label: "Behavioral Psychology", x: 8, y: 88, z: 1, color: "gray" },
+  { label: "Learning Theory", x: 48, y: 78, z: 2, color: "blue" },
+  { label: "Motor Control", x: 55, y: 15, z: 1, color: "green" },
+  { label: "Sensory Processing", x: 52, y: 55, z: 3, color: "gray" },
+  { label: "Attention Networks", x: 18, y: 48, z: 2, color: "blue" },
+  { label: "Executive Function", x: 38, y: 85, z: 1, color: "green" },
+]
+
+// Floating node component
+function FloatingNode({ 
+  label, 
+  x, 
+  y, 
+  z, 
+  color, 
+  delay,
+  isUserNode = false 
+}: { 
+  label: string
+  x: number
+  y: number
+  z: number
+  color: string
+  delay: number
+  isUserNode?: boolean
+}) {
+  const colorClasses = {
+    blue: "bg-[#e3edf7] text-[#5a7a9a] border-[#d0e0ef]",
+    green: "bg-[#e8f5ec] text-[#5a8a6a] border-[#d0eadb]",
+    gray: "bg-[#f0f2f5] text-[#6a7a8a] border-[#e0e5eb]",
+    user: "bg-white text-[#3a4a5a] border-[#c0d0e0] shadow-md"
+  }
+
+  const scaleByZ = 0.7 + (z * 0.15)
+  const opacityByZ = isUserNode ? 0.95 : 0.4 + (z * 0.15)
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.8, y: 20 }}
+      animate={{ 
+        opacity: opacityByZ,
+        scale: scaleByZ,
+        y: 0,
+      }}
+      transition={{ 
+        duration: 0.8, 
+        delay: delay,
+        ease: "easeOut"
+      }}
+      className="absolute pointer-events-none select-none"
+      style={{ 
+        left: `${x}%`, 
+        top: `${y}%`,
+        zIndex: z 
+      }}
+    >
+      <motion.div
+        animate={{
+          y: [0, -6, 0],
+          rotate: [-0.5, 0.5, -0.5]
+        }}
+        transition={{
+          duration: 4 + z * 2,
+          repeat: Infinity,
+          ease: "easeInOut",
+          delay: delay
+        }}
+      >
+        <div 
+          className={`
+            px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap
+            border backdrop-blur-sm
+            ${isUserNode ? colorClasses.user : colorClasses[color as keyof typeof colorClasses]}
+          `}
+          style={{
+            boxShadow: isUserNode 
+              ? '0 4px 20px rgba(0,0,0,0.08)' 
+              : '0 2px 8px rgba(0,0,0,0.04)'
+          }}
+        >
+          {label}
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// Connection lines between nodes (very subtle)
+function ConnectionLines() {
+  return (
+    <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
+      <defs>
+        <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#d0e0ef" stopOpacity="0.3" />
+          <stop offset="100%" stopColor="#d0eadb" stopOpacity="0.3" />
+        </linearGradient>
+      </defs>
+      {/* Subtle connecting lines */}
+      <motion.path
+        d="M 100 80 Q 200 120 280 140"
+        stroke="url(#lineGradient)"
+        strokeWidth="1"
+        fill="none"
+        initial={{ pathLength: 0 }}
+        animate={{ pathLength: 1 }}
+        transition={{ duration: 2, delay: 0.5 }}
+      />
+      <motion.path
+        d="M 150 250 Q 250 200 350 180"
+        stroke="url(#lineGradient)"
+        strokeWidth="1"
+        fill="none"
+        initial={{ pathLength: 0 }}
+        animate={{ pathLength: 1 }}
+        transition={{ duration: 2, delay: 0.8 }}
+      />
+      <motion.path
+        d="M 80 400 Q 180 350 300 320"
+        stroke="url(#lineGradient)"
+        strokeWidth="1"
+        fill="none"
+        initial={{ pathLength: 0 }}
+        animate={{ pathLength: 1 }}
+        transition={{ duration: 2, delay: 1.1 }}
+      />
+    </svg>
+  )
+}
 
 export default function OnboardingPage() {
   const navigate = useNavigate()
@@ -44,6 +184,8 @@ export default function OnboardingPage() {
   // Papers scene state
   const [paperLinks, setPaperLinks] = useState<string[]>([])
   const [currentLink, setCurrentLink] = useState("")
+  const [paperFiles, setPaperFiles] = useState<File[]>([])
+  const paperFileRef = useRef<HTMLInputElement>(null)
 
   // Initialize user on mount
   const [userReady, setUserReady] = useState(false)
@@ -68,7 +210,6 @@ export default function OnboardingPage() {
     e.preventDefault()
     if (!centralTopic.trim()) return
     
-    // If user not ready yet, show loading and wait
     if (!userId) {
       setError("Initializing... please try again in a moment.")
       return
@@ -86,7 +227,6 @@ export default function OnboardingPage() {
       const data = await res.json()
       setSessionId(data.session_id)
       
-      // Add central topic as first node
       setNodes([{ label: centralTopic, type: "concept", confidence: 1.0 }])
       setScene("background")
     } catch (e) {
@@ -175,33 +315,69 @@ export default function OnboardingPage() {
     setPaperLinks(prev => prev.filter((_, i) => i !== index))
   }
 
+  const addPaperFiles = (files: FileList | null) => {
+    if (files) {
+      setPaperFiles(prev => [...prev, ...Array.from(files)])
+    }
+  }
+
+  const removePaperFile = (index: number) => {
+    setPaperFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
   const handlePapersSubmit = async () => {
-    if (paperLinks.length === 0 || !sessionId || !userId) return
+    if ((paperLinks.length === 0 && paperFiles.length === 0) || !sessionId || !userId) return
     
     setIsLoading(true)
     setError(null)
     
     try {
-      const res = await fetch(`${API_BASE}/api/profile/papers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          papers: paperLinks.map(url => ({ url, title: url })),
-          session_id: sessionId,
-          user_id: userId
-        })
-      })
-      const data = await res.json()
+      let allNodes: KnowledgeNode[] = []
       
-      if (data.success) {
-        setNodes(prev => [...prev, ...data.nodes])
-        // Navigate to lessons or graph view
-        navigate("/lessons")
-      } else {
-        setError(data.error || "Failed to process papers")
+      if (paperLinks.length > 0) {
+        const res = await fetch(`${API_BASE}/api/profile/papers`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            papers: paperLinks.map(url => ({ url, title: url })),
+            session_id: sessionId,
+            user_id: userId
+          })
+        })
+        const data = await res.json()
+        
+        if (data.success && data.nodes) {
+          allNodes = [...allNodes, ...data.nodes]
+        } else if (!data.success) {
+          throw new Error(data.error || "Failed to process paper links")
+        }
       }
+      
+      for (const file of paperFiles) {
+        const formData = new FormData()
+        formData.append("file", file)
+        formData.append("session_id", sessionId)
+        formData.append("user_id", userId.toString())
+        formData.append("title", file.name.replace(/\.[^/.]+$/, ""))
+        
+        const res = await fetch(`${API_BASE}/api/profile/paper-file`, {
+          method: "POST",
+          body: formData
+        })
+        const data = await res.json()
+        
+        if (data.success && data.nodes) {
+          allNodes = [...allNodes, ...data.nodes]
+        }
+      }
+      
+      if (allNodes.length > 0) {
+        setNodes(prev => [...prev, ...allNodes])
+      }
+      
+      navigate("/lessons")
     } catch (e) {
-      setError("Failed to submit papers. Please try again.")
+      setError(e instanceof Error ? e.message : "Failed to submit papers. Please try again.")
     } finally {
       setIsLoading(false)
     }
@@ -211,287 +387,410 @@ export default function OnboardingPage() {
     navigate("/lessons")
   }
 
-  // Render knowledge graph visualization (simplified)
-  const renderGraph = useCallback(() => {
-    if (nodes.length === 0) return null
-    
-    return (
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        {/* Ambient background nodes */}
-        {nodes.map((node, i) => {
-          const angle = (i / nodes.length) * Math.PI * 2
-          const radius = 150 + (i * 20)
-          const x = 50 + Math.cos(angle) * (radius / 5)
-          const y = 50 + Math.sin(angle) * (radius / 8)
-          const opacity = scene === "topic" ? 0.15 : 0.4 + (node.confidence || 0.5) * 0.4
-          const scale = 0.8 + (node.mastery_estimate || node.confidence || 0.5) * 0.4
-          
-          return (
-            <div
-              key={i}
-              className="absolute transition-all duration-1000 ease-out"
-              style={{
-                left: `${x}%`,
-                top: `${y}%`,
-                transform: `translate(-50%, -50%) scale(${scale})`,
-                opacity
-              }}
-            >
-              <div className={`
-                px-3 py-1.5 rounded-full text-xs font-medium
-                ${node.type === "domain" ? "bg-cobalt/20 text-cobalt border border-cobalt/30" : ""}
-                ${node.type === "concept" ? "bg-lime/20 text-ink border border-lime/30" : ""}
-                ${node.type === "method" ? "bg-amber/20 text-ink border border-amber/30" : ""}
-                ${node.type === "theory" ? "bg-purple-500/20 text-purple-700 border border-purple-500/30" : ""}
-                ${node.type === "tool" ? "bg-cyan-500/20 text-cyan-700 border border-cyan-500/30" : ""}
-                ${!node.type ? "bg-ink/10 text-ink/70 border border-ink/20" : ""}
-              `}>
-                {node.label}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    )
-  }, [nodes, scene])
+  // Generate user nodes with positions
+  const userNodes = useMemo(() => {
+    return nodes.map((node, i) => ({
+      ...node,
+      x: 15 + (i % 3) * 18,
+      y: 25 + Math.floor(i / 3) * 15 + (i % 2) * 8,
+      z: 2 + (i % 2),
+      delay: 0.3 + i * 0.15
+    }))
+  }, [nodes])
 
   return (
-    <main className="relative min-h-screen bg-hero overflow-hidden">
-      {/* Ambient background */}
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-28 right-[-8%] h-72 w-72 rounded-full bg-cobalt/20 blur-[120px]" />
-        <div className="absolute bottom-[-18%] left-[-10%] h-96 w-96 rounded-full bg-lime/35 blur-[140px]" />
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(10,15,31,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(10,15,31,0.04)_1px,transparent_1px)] bg-[size:72px_72px]" />
+    <main className="relative min-h-screen overflow-hidden">
+      {/* Soft gradient background */}
+      <div 
+        className="absolute inset-0"
+        style={{
+          background: 'linear-gradient(135deg, #e8f4f8 0%, #eef6f4 40%, #e8f8f0 100%)'
+        }}
+      />
+      
+      {/* Subtle texture overlay */}
+      <div 
+        className="absolute inset-0 opacity-30"
+        style={{
+          backgroundImage: `radial-gradient(circle at 20% 30%, rgba(200, 220, 240, 0.4) 0%, transparent 50%),
+                           radial-gradient(circle at 70% 70%, rgba(200, 240, 220, 0.3) 0%, transparent 50%)`
+        }}
+      />
+
+      {/* Left 2/3: Knowledge Graph Visualization */}
+      <div className="absolute inset-y-0 left-0 w-2/3 overflow-hidden">
+        <ConnectionLines />
+        
+        {/* Decorative background nodes */}
+        {DECORATIVE_NODES.map((node, i) => (
+          <FloatingNode
+            key={`decorative-${i}`}
+            label={node.label}
+            x={node.x}
+            y={node.y}
+            z={node.z}
+            color={node.color}
+            delay={0.1 + i * 0.08}
+          />
+        ))}
+        
+        {/* User-generated nodes */}
+        <AnimatePresence>
+          {userNodes.map((node, i) => (
+            <FloatingNode
+              key={`user-${i}-${node.label}`}
+              label={node.label}
+              x={node.x}
+              y={node.y}
+              z={node.z}
+              color="user"
+              delay={node.delay}
+              isUserNode={true}
+            />
+          ))}
+        </AnimatePresence>
       </div>
 
-      {/* Knowledge graph visualization */}
-      {renderGraph()}
-
-      {/* Scene 1: Topic Entry */}
-      {scene === "topic" && (
-        <div className="relative flex items-center justify-center min-h-screen px-8">
-          <div className="w-full max-w-2xl text-center space-y-8">
-            <h1 className="font-serif text-4xl sm:text-5xl text-ink leading-tight">
-              What question is driving your research?
-            </h1>
-            
-            <form onSubmit={handleTopicSubmit} className="space-y-4">
-              <input
-                type="text"
-                value={centralTopic}
-                onChange={(e) => setCentralTopic(e.target.value)}
-                placeholder="e.g., How can we improve knowledge tracing in adaptive learning systems?"
-                className="w-full text-lg px-6 py-4 rounded-2xl border-2 border-ink/10 bg-white/80 backdrop-blur-sm text-ink placeholder:text-muted/50 focus:outline-none focus:border-cobalt/50 focus:ring-4 focus:ring-cobalt/10 transition-all"
-                autoFocus
-                disabled={isLoading}
-              />
-              
-              <p className="text-sm text-muted">
-                {userReady ? "Press Enter to continue" : "Connecting to server..."}
-              </p>
-              
-              {error && <p className="text-sm text-red-500">{error}</p>}
-              
-              {isLoading && (
-                <div className="flex items-center justify-center gap-2 text-muted">
-                  <div className="w-4 h-4 border-2 border-cobalt/30 border-t-cobalt rounded-full animate-spin" />
-                  <span>Creating your knowledge space...</span>
-                </div>
-              )}
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Scene 2: Background Collection */}
-      {scene === "background" && (
-        <div className="relative flex items-end justify-center min-h-screen pb-12">
-          <div className={`
-            w-full max-w-xl mx-8 p-8 rounded-3xl border-2 border-ink/10 bg-white/90 backdrop-blur-md
-            transform transition-all duration-500 ease-out
-            ${backgroundChoice ? "translate-y-0" : "translate-y-4"}
-          `}>
-            <h2 className="font-serif text-2xl text-ink mb-2">What's your background?</h2>
-            <p className="text-muted text-sm mb-6">Help us understand your existing knowledge</p>
-            
-            {!backgroundChoice ? (
-              <div className="grid grid-cols-3 gap-3">
-                <button
-                  onClick={() => {
-                    setBackgroundChoice("cv")
-                    cvRef.current?.click()
-                  }}
-                  className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-ink/10 hover:border-cobalt/40 hover:bg-cobalt/5 transition-all"
-                >
-                  <span className="text-2xl">📄</span>
-                  <span className="text-sm font-medium text-ink">Upload CV</span>
-                </button>
+      {/* Right 1/3: Interactive Panel */}
+      <div className="absolute inset-y-0 right-0 w-1/3 flex items-center justify-center p-8">
+        <AnimatePresence mode="wait">
+          {/* Scene 1: Topic Entry */}
+          {scene === "topic" && (
+            <motion.div
+              key="topic"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.4 }}
+              className="w-full max-w-md"
+            >
+              <div 
+                className="p-8 rounded-2xl bg-white/95 backdrop-blur-sm border border-gray-100"
+                style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.06)' }}
+              >
+                <h1 className="font-serif text-2xl text-gray-800 mb-2 leading-tight">
+                  What question is driving your research?
+                </h1>
+                <p className="text-gray-500 text-sm mb-6">
+                  Start building your knowledge graph
+                </p>
                 
-                <button
-                  onClick={() => setBackgroundChoice("describe")}
-                  className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-ink/10 hover:border-lime/40 hover:bg-lime/5 transition-all"
-                >
-                  <span className="text-2xl">✍️</span>
-                  <span className="text-sm font-medium text-ink">I'll describe it</span>
-                </button>
-                
-                <button
-                  onClick={handleSkipBackground}
-                  className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-ink/10 hover:border-ink/20 transition-all"
-                >
-                  <span className="text-2xl">⏭️</span>
-                  <span className="text-sm font-medium text-muted">Skip</span>
-                </button>
+                <form onSubmit={handleTopicSubmit} className="space-y-4">
+                  <input
+                    type="text"
+                    value={centralTopic}
+                    onChange={(e) => setCentralTopic(e.target.value)}
+                    placeholder="e.g., How does sleep affect memory consolidation?"
+                    className="w-full text-base px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-100 transition-all"
+                    autoFocus
+                    disabled={isLoading}
+                  />
+                  
+                  <Button
+                    type="submit"
+                    disabled={!centralTopic.trim() || isLoading || !userReady}
+                    className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl transition-colors"
+                  >
+                    {isLoading ? (
+                      <span className="flex items-center gap-2">
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                          className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+                        />
+                        Creating...
+                      </span>
+                    ) : userReady ? (
+                      "Continue"
+                    ) : (
+                      "Connecting..."
+                    )}
+                  </Button>
+                  
+                  {error && (
+                    <p className="text-sm text-red-500 text-center">{error}</p>
+                  )}
+                </form>
               </div>
-            ) : backgroundChoice === "cv" ? (
-              <div className="space-y-4">
-                <input
-                  type="file"
-                  ref={cvRef}
-                  accept=".pdf,.doc,.docx"
-                  onChange={(e) => setCvFile(e.target.files?.[0] || null)}
-                  className="hidden"
-                />
+            </motion.div>
+          )}
+
+          {/* Scene 2: Background Collection */}
+          {scene === "background" && (
+            <motion.div
+              key="background"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.4 }}
+              className="w-full max-w-md"
+            >
+              <div 
+                className="p-8 rounded-2xl bg-white/95 backdrop-blur-sm border border-gray-100"
+                style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.06)' }}
+              >
+                <h2 className="font-serif text-2xl text-gray-800 mb-2">
+                  What's your background?
+                </h2>
+                <p className="text-gray-500 text-sm mb-6">
+                  Help us understand your existing knowledge
+                </p>
                 
-                {cvFile ? (
-                  <div className="flex items-center gap-3 p-4 rounded-xl bg-lime/10 border border-lime/30">
-                    <span className="text-2xl">✅</span>
-                    <span className="flex-1 text-sm text-ink truncate">{cvFile.name}</span>
-                    <button onClick={() => setCvFile(null)} className="text-muted hover:text-ink">✕</button>
+                {!backgroundChoice ? (
+                  <div className="space-y-3">
+                    <button
+                      onClick={() => {
+                        setBackgroundChoice("cv")
+                        cvRef.current?.click()
+                      }}
+                      className="w-full flex items-center gap-4 p-4 rounded-xl border border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-all text-left"
+                    >
+                      <span className="text-xl">📄</span>
+                      <div>
+                        <div className="font-medium text-gray-800">Upload CV</div>
+                        <div className="text-sm text-gray-500">PDF or Word document</div>
+                      </div>
+                    </button>
+                    
+                    <button
+                      onClick={() => setBackgroundChoice("describe")}
+                      className="w-full flex items-center gap-4 p-4 rounded-xl border border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-all text-left"
+                    >
+                      <span className="text-xl">✍️</span>
+                      <div>
+                        <div className="font-medium text-gray-800">Describe it</div>
+                        <div className="text-sm text-gray-500">Write a brief summary</div>
+                      </div>
+                    </button>
+                    
+                    <button
+                      onClick={handleSkipBackground}
+                      className="w-full flex items-center justify-center gap-2 p-3 text-gray-500 hover:text-gray-700 transition-colors"
+                    >
+                      <span>Skip for now</span>
+                      <span>→</span>
+                    </button>
                   </div>
-                ) : (
-                  <button
-                    onClick={() => cvRef.current?.click()}
-                    className="w-full p-6 rounded-xl border-2 border-dashed border-ink/20 hover:border-cobalt/40 transition-all text-muted"
-                  >
-                    Click to select a file
-                  </button>
-                )}
-                
-                <div className="flex gap-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setBackgroundChoice(null)
-                      setCvFile(null)
-                    }}
-                  >
-                    Back
-                  </Button>
-                  <Button
-                    onClick={handleCVUpload}
-                    disabled={!cvFile || isLoading}
-                    className="flex-1"
-                  >
-                    {isLoading ? "Processing..." : "Continue"}
-                  </Button>
-                </div>
-              </div>
-            ) : backgroundChoice === "describe" ? (
-              <div className="space-y-4">
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Describe your academic background, research experience, courses taken, skills..."
-                  rows={5}
-                  className="w-full px-4 py-3 rounded-xl border-2 border-ink/10 bg-white/80 text-ink placeholder:text-muted/50 focus:outline-none focus:border-cobalt/50 resize-none"
-                  autoFocus
-                />
-                
-                <div className="flex gap-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setBackgroundChoice(null)
-                      setDescription("")
-                    }}
-                  >
-                    Back
-                  </Button>
-                  <Button
-                    onClick={handleDescriptionSubmit}
-                    disabled={!description.trim() || isLoading}
-                    className="flex-1"
-                  >
-                    {isLoading ? "Analyzing..." : "Continue"}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-            
-            {error && <p className="text-sm text-red-500 mt-4">{error}</p>}
-          </div>
-        </div>
-      )}
-
-      {/* Scene 3: Paper Ingestion */}
-      {scene === "papers" && (
-        <div className="relative flex items-center justify-center min-h-screen px-8">
-          <div className="w-full max-w-2xl p-8 rounded-3xl border-2 border-ink/10 bg-white/90 backdrop-blur-md">
-            <h2 className="font-serif text-2xl text-ink mb-2">Add papers you've already internalized</h2>
-            <p className="text-muted text-sm mb-6">Paste arXiv/DOI links or paper titles</p>
-            
-            <div className="space-y-4">
-              {/* Paper input */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={currentLink}
-                  onChange={(e) => setCurrentLink(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addPaperLink()}
-                  placeholder="https://arxiv.org/abs/... or paper title"
-                  className="flex-1 px-4 py-3 rounded-xl border-2 border-ink/10 bg-white/80 text-ink placeholder:text-muted/50 focus:outline-none focus:border-cobalt/50"
-                />
-                <Button onClick={addPaperLink} disabled={!currentLink.trim()}>
-                  Add
-                </Button>
-              </div>
-              
-              {/* Paper list */}
-              {paperLinks.length > 0 && (
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {paperLinks.map((link, i) => (
-                    <div key={i} className="flex items-center gap-2 p-3 rounded-lg bg-ink/5">
-                      <span className="text-sm text-cobalt">📄</span>
-                      <span className="flex-1 text-sm text-ink truncate">{link}</span>
+                ) : backgroundChoice === "cv" ? (
+                  <div className="space-y-4">
+                    <input
+                      type="file"
+                      ref={cvRef}
+                      accept=".pdf,.doc,.docx"
+                      onChange={(e) => setCvFile(e.target.files?.[0] || null)}
+                      className="hidden"
+                    />
+                    
+                    {cvFile ? (
+                      <div className="flex items-center gap-3 p-4 rounded-xl bg-green-50 border border-green-200">
+                        <span className="text-lg">✅</span>
+                        <span className="flex-1 text-sm text-gray-700 truncate">{cvFile.name}</span>
+                        <button 
+                          onClick={() => setCvFile(null)} 
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
                       <button
-                        onClick={() => removePaperLink(i)}
-                        className="text-muted hover:text-ink"
+                        onClick={() => cvRef.current?.click()}
+                        className="w-full p-8 rounded-xl border-2 border-dashed border-gray-300 hover:border-gray-400 transition-all text-gray-500 hover:text-gray-600"
                       >
-                        ✕
+                        Click to select a file
                       </button>
+                    )}
+                    
+                    <div className="flex gap-3">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setBackgroundChoice(null)
+                          setCvFile(null)
+                        }}
+                        className="flex-1"
+                      >
+                        Back
+                      </Button>
+                      <Button
+                        onClick={handleCVUpload}
+                        disabled={!cvFile || isLoading}
+                        className="flex-1 bg-gray-800 hover:bg-gray-700"
+                      >
+                        {isLoading ? "Processing..." : "Continue"}
+                      </Button>
                     </div>
-                  ))}
-                </div>
-              )}
-              
-              <div className="flex gap-3 pt-4">
-                <Button variant="outline" onClick={handleSkipPapers}>
-                  Skip for now
-                </Button>
-                <Button
-                  onClick={handlePapersSubmit}
-                  disabled={paperLinks.length === 0 || isLoading}
-                  className="flex-1"
-                >
-                  {isLoading ? "Analyzing papers..." : `Continue with ${paperLinks.length} paper${paperLinks.length !== 1 ? "s" : ""}`}
-                </Button>
+                  </div>
+                ) : backgroundChoice === "describe" ? (
+                  <div className="space-y-4">
+                    <textarea
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder="Describe your academic background, research experience, courses taken, skills..."
+                      rows={5}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-gray-400 resize-none"
+                      autoFocus
+                    />
+                    
+                    <div className="flex gap-3">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setBackgroundChoice(null)
+                          setDescription("")
+                        }}
+                        className="flex-1"
+                      >
+                        Back
+                      </Button>
+                      <Button
+                        onClick={handleDescriptionSubmit}
+                        disabled={!description.trim() || isLoading}
+                        className="flex-1 bg-gray-800 hover:bg-gray-700"
+                      >
+                        {isLoading ? "Analyzing..." : "Continue"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+                
+                {error && <p className="text-sm text-red-500 mt-4">{error}</p>}
               </div>
-              
-              {error && <p className="text-sm text-red-500 mt-4">{error}</p>}
-            </div>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          )}
+
+          {/* Scene 3: Paper Ingestion */}
+          {scene === "papers" && (
+            <motion.div
+              key="papers"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.4 }}
+              className="w-full max-w-md"
+            >
+              <div 
+                className="p-8 rounded-2xl bg-white/95 backdrop-blur-sm border border-gray-100"
+                style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.06)' }}
+              >
+                <h2 className="font-serif text-2xl text-gray-800 mb-2">
+                  Add papers you've read
+                </h2>
+                <p className="text-gray-500 text-sm mb-6">
+                  Paste arXiv/DOI links or upload PDFs
+                </p>
+                
+                <div className="space-y-4">
+                  {/* Paper link input */}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={currentLink}
+                      onChange={(e) => setCurrentLink(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPaperLink())}
+                      placeholder="https://arxiv.org/abs/..."
+                      className="flex-1 px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-gray-400 text-sm"
+                    />
+                    <Button 
+                      onClick={addPaperLink} 
+                      disabled={!currentLink.trim()}
+                      variant="outline"
+                    >
+                      Add
+                    </Button>
+                  </div>
+                  
+                  {/* File upload */}
+                  <input
+                    type="file"
+                    ref={paperFileRef}
+                    accept=".pdf"
+                    multiple
+                    onChange={(e) => addPaperFiles(e.target.files)}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => paperFileRef.current?.click()}
+                    className="w-full p-4 rounded-xl border-2 border-dashed border-gray-300 hover:border-gray-400 transition-all text-gray-500 hover:text-gray-600 flex items-center justify-center gap-2"
+                  >
+                    <span>📎</span>
+                    <span>Upload PDF files</span>
+                  </button>
+                  
+                  {/* Paper links list */}
+                  {paperLinks.length > 0 && (
+                    <div className="space-y-2 max-h-24 overflow-y-auto">
+                      {paperLinks.map((link, i) => (
+                        <div key={`link-${i}`} className="flex items-center gap-2 p-3 rounded-lg bg-gray-50">
+                          <span className="text-sm text-blue-500">🔗</span>
+                          <span className="flex-1 text-sm text-gray-700 truncate">{link}</span>
+                          <button
+                            onClick={() => removePaperLink(i)}
+                            className="text-gray-400 hover:text-gray-600"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {/* Paper files list */}
+                  {paperFiles.length > 0 && (
+                    <div className="space-y-2 max-h-24 overflow-y-auto">
+                      {paperFiles.map((file, i) => (
+                        <div key={`file-${i}`} className="flex items-center gap-2 p-3 rounded-lg bg-green-50 border border-green-200">
+                          <span className="text-sm">📄</span>
+                          <span className="flex-1 text-sm text-gray-700 truncate">{file.name}</span>
+                          <span className="text-xs text-gray-500">{(file.size / 1024 / 1024).toFixed(1)} MB</span>
+                          <button
+                            onClick={() => removePaperFile(i)}
+                            className="text-gray-400 hover:text-gray-600"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  <div className="flex gap-3 pt-2">
+                    <Button variant="outline" onClick={handleSkipPapers} className="flex-1">
+                      Skip
+                    </Button>
+                    <Button
+                      onClick={handlePapersSubmit}
+                      disabled={(paperLinks.length === 0 && paperFiles.length === 0) || isLoading}
+                      className="flex-1 bg-gray-800 hover:bg-gray-700"
+                    >
+                      {isLoading ? "Analyzing..." : `Continue${(paperLinks.length + paperFiles.length) > 0 ? ` (${paperLinks.length + paperFiles.length})` : ""}`}
+                    </Button>
+                  </div>
+                  
+                  {error && <p className="text-sm text-red-500 mt-4">{error}</p>}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* Node count indicator */}
-      {nodes.length > 1 && (
-        <div className="fixed bottom-6 right-6 px-4 py-2 rounded-full bg-white/90 backdrop-blur-sm border border-ink/10 shadow-lg">
-          <span className="text-sm text-muted">
-            <strong className="text-ink">{nodes.length}</strong> knowledge nodes
-          </span>
-        </div>
-      )}
+      <AnimatePresence>
+        {nodes.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            className="fixed bottom-6 left-6 px-4 py-2 rounded-full bg-white/90 backdrop-blur-sm border border-gray-200"
+            style={{ boxShadow: '0 4px 20px rgba(0,0,0,0.05)' }}
+          >
+            <span className="text-sm text-gray-600">
+              <strong className="text-gray-800">{nodes.length}</strong> knowledge nodes
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </main>
   )
 }
