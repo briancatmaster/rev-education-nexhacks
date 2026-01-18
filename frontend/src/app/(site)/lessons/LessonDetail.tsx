@@ -2,11 +2,12 @@
 
 import { useMemo } from "react"
 import { useParams } from "next/navigation"
+import Link from "next/link"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { demoPlan, type Lesson, type LessonPlan } from "@/lib/lesson-plan"
+import type { Lesson, LessonPlan } from "@/lib/lesson-plan"
 
 const typeCopy: Record<Lesson["type"], string> = {
   reading: "Annotated reading",
@@ -19,16 +20,17 @@ export default function LessonDetail() {
   const params = useParams<{ lessonId: string }>()
   const stored =
     typeof window !== "undefined" ? window.localStorage.getItem("lessonPlan") : null
-  let plan: LessonPlan = demoPlan
+  let plan: LessonPlan | null = null
   if (stored) {
     try {
       plan = JSON.parse(stored) as LessonPlan
     } catch {
-      plan = demoPlan
+      plan = null
     }
   }
 
   const lesson = useMemo(() => {
+    if (!plan) return null
     for (const unit of plan.units) {
       const match = unit.lessons.find((item) => item.id === params.lessonId)
       if (match) {
@@ -36,7 +38,23 @@ export default function LessonDetail() {
       }
     }
     return null
-  }, [params.lessonId, plan.units])
+  }, [params.lessonId, plan])
+
+  if (!plan) {
+    return (
+      <div className="rounded-3xl border border-peach/60 bg-white/80 p-8">
+        <h1 className="font-serif text-2xl text-ink">No lesson plan found</h1>
+        <p className="mt-2 text-sm text-muted">
+          Create your learning origin first to generate a personalized lesson path.
+        </p>
+        <div className="mt-4">
+          <Button asChild>
+            <Link href="/origin">Build learning origin</Link>
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   if (!lesson) {
     return (

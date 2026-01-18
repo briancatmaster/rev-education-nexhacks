@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
-import { demoPlan, type LessonPlan } from "@/lib/lesson-plan"
+import type { LessonPlan } from "@/lib/lesson-plan"
 
 const lessonTypeLabel = {
   reading: "Reading",
@@ -16,7 +16,7 @@ const lessonTypeLabel = {
 
 export default function LessonSidebar({ compact = false }: { compact?: boolean }) {
   const pathname = usePathname()
-  const [plan, setPlan] = useState<LessonPlan>(demoPlan)
+  const [plan, setPlan] = useState<LessonPlan | null>(null)
 
   useEffect(() => {
     const stored = window.localStorage.getItem("lessonPlan")
@@ -24,19 +24,34 @@ export default function LessonSidebar({ compact = false }: { compact?: boolean }
       try {
         setPlan(JSON.parse(stored) as LessonPlan)
       } catch {
-        setPlan(demoPlan)
+        setPlan(null)
       }
     }
   }, [])
 
   const activeLessonId = useMemo(() => {
+    if (!plan) return null
     const parts = pathname.split("/").filter(Boolean)
     return parts[parts.length - 1] === "lessons" ? plan.units[0]?.lessons[0]?.id : parts.at(-1)
-  }, [pathname, plan.units])
+  }, [pathname, plan])
 
   const containerClass = compact
     ? "w-full overflow-y-auto rounded-2xl border border-peach/60 bg-paper/80 p-4"
     : "sticky top-20 h-[calc(100vh-5rem)] w-full overflow-y-auto border-r border-peach/60 bg-paper/80 p-6"
+
+  if (!plan) {
+    return (
+      <aside className={containerClass}>
+        <div className="mb-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-cobalt">
+            Lesson track
+          </p>
+          <h2 className="mt-2 text-lg font-semibold text-ink">No plan yet</h2>
+          <p className="text-xs text-muted">Create your learning origin to get started.</p>
+        </div>
+      </aside>
+    )
+  }
 
   return (
     <aside className={containerClass}>

@@ -122,7 +122,7 @@ export default function OriginForm() {
                   id="background"
                   value={background}
                   onChange={(event) => setBackground(event.target.value)}
-                  placeholder="Example: Computational neuroscience, fluent in linear algebra and Python, read papers in Nature + NeurIPS, prefer applied labs."
+                  placeholder=""
                   required
                 />
                 <p className="text-xs text-muted">
@@ -139,7 +139,7 @@ export default function OriginForm() {
                   id="target"
                   value={target}
                   onChange={(event) => setTarget(event.target.value)}
-                  placeholder="Example: Differential geometry for modeling protein folding, with focus on curvature, manifolds, and applied research."
+                  placeholder=""
                   required
                 />
                 <p className="text-xs text-muted">
@@ -193,7 +193,7 @@ export default function OriginForm() {
                     value={customSkill}
                     onChange={(event) => setCustomSkill(event.target.value)}
                     className="h-11 flex-1 rounded-xl border border-peach/80 bg-paper px-4 text-sm text-ink"
-                    placeholder="Example: Probability distributions"
+                    placeholder=""
                   />
                   <Button type="button" variant="outline" onClick={handleCustomSkill}>
                     Add skill

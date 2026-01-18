@@ -6,10 +6,10 @@ import { useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { demoPlan, type LessonPlan } from "@/lib/lesson-plan"
+import type { LessonPlan } from "@/lib/lesson-plan"
 
 export default function LessonOverview() {
-  const [plan, setPlan] = useState<LessonPlan>(demoPlan)
+  const [plan, setPlan] = useState<LessonPlan | null>(null)
 
   useEffect(() => {
     const stored = window.localStorage.getItem("lessonPlan")
@@ -17,10 +17,30 @@ export default function LessonOverview() {
       try {
         setPlan(JSON.parse(stored) as LessonPlan)
       } catch {
-        setPlan(demoPlan)
+        setPlan(null)
       }
     }
   }, [])
+
+  if (!plan) {
+    return (
+      <div className="rounded-3xl border border-peach/60 bg-white/80 p-8 shadow-float">
+        <Badge>No lesson plan yet</Badge>
+        <h1 className="mt-4 font-serif text-3xl text-ink">
+          Create your learning origin first
+        </h1>
+        <p className="mt-3 text-base text-muted">
+          Start by building your learning origin so we can generate a personalized lesson
+          path based on your background and goals.
+        </p>
+        <div className="mt-5">
+          <Button asChild>
+            <Link href="/origin">Build learning origin</Link>
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   const primaryUnit = plan.units[0]
 
