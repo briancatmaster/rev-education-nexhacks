@@ -5,13 +5,10 @@ import { useRouter } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Textarea } from "@/components/ui/textarea"
 
 export default function OriginForm() {
   const router = useRouter()
-  const [background, setBackground] = useState("")
-  const [target, setTarget] = useState("")
+  const [learningGoal, setLearningGoal] = useState("")
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle")
   const [step, setStep] = useState<"origin" | "skills">("origin")
   const [skills, setSkills] = useState<
@@ -35,8 +32,8 @@ export default function OriginForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          background,
-          target,
+          background: "",
+          target: learningGoal,
           stage: step === "origin" ? "skills" : "plan",
           skills:
             step === "skills"
@@ -96,63 +93,52 @@ export default function OriginForm() {
   }
 
   return (
-    <Card className="bg-white/85">
-      <CardHeader>
-        <Badge variant="accent">Learning Origin</Badge>
-        <CardTitle className="mt-4">
-          {step === "origin"
-            ? "Tell us what you know and where you want to go."
-            : "Rate your current skill levels before we build the path."}
-        </CardTitle>
-        <p className="text-sm text-muted">
-          {step === "origin"
-            ? "The more context you share, the more precise the lesson path. Mention your strongest domains, tools, and the types of resources you trust."
-            : "We start with the foundations. Tell us which prerequisites are solid and which need reinforcement so we can sequence the lessons correctly."}
-        </p>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {step === "origin" ? (
-            <>
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-ink" htmlFor="background">
-                  Your specialty + background
-                </label>
-                <Textarea
-                  id="background"
-                  value={background}
-                  onChange={(event) => setBackground(event.target.value)}
-                  placeholder=""
-                  required
-                />
-                <p className="text-xs text-muted">
-                  Include coursework, research domains, programming stacks, and papers you
-                  already understand.
-                </p>
-              </div>
+    <div className="w-full rounded-3xl border-2 border-ink/10 bg-white/70 backdrop-blur-sm p-8">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {step === "origin" ? (
+          <>
+            <div className="space-y-3">
+              <label 
+                htmlFor="learningGoal" 
+                className="block text-sm font-semibold text-ink"
+              >
+                What do you want to learn?
+              </label>
+              <input
+                id="learningGoal"
+                type="text"
+                value={learningGoal}
+                onChange={(event) => setLearningGoal(event.target.value)}
+                placeholder="Knowledge Tracing"
+                required
+                className="w-full text-base px-4 py-4 rounded-xl border-2 border-ink/10 bg-white/80 text-ink placeholder:text-muted/50 focus:outline-none focus:border-cobalt/50 focus:ring-4 focus:ring-cobalt/10 transition-all"
+              />
+            </div>
+            
+            <Button 
+              type="submit" 
+              size="lg"
+              disabled={status === "loading"}
+              className="w-full py-6 text-lg"
+            >
+              {status === "loading" ? "Generating..." : "Begin your journey →"}
+            </Button>
 
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-ink" htmlFor="target">
-                  What do you want to learn next?
-                </label>
-                <Textarea
-                  id="target"
-                  value={target}
-                  onChange={(event) => setTarget(event.target.value)}
-                  placeholder=""
-                  required
-                />
-                <p className="text-xs text-muted">
-                  Be specific about the topic and how you want the material framed.
-                </p>
-              </div>
-            </>
-          ) : (
+            {message && (
+              <p className="text-sm text-amber">{message}</p>
+            )}
+          </>
+        ) : (
             <>
-              <div className="space-y-4">
+              <div className="space-y-2 mb-6">
+                <h2 className="font-serif text-2xl text-ink">Rate your skill levels</h2>
+                <p className="text-sm text-muted">Help us customize your learning path</p>
+              </div>
+              
+              <div className="space-y-3">
                 {skills.map((skill, index) => (
-                  <div key={skill.id} className="rounded-2xl border border-peach/60 bg-white/70 p-4">
-                    <div className="flex items-center justify-between">
+                  <div key={skill.id} className="rounded-xl border border-ink/10 bg-white/60 p-4">
+                    <div className="flex items-center justify-between mb-2">
                       <div>
                         <p className="text-sm font-semibold text-ink">{skill.name}</p>
                         <p className="text-xs text-muted">{skill.description}</p>
@@ -160,8 +146,8 @@ export default function OriginForm() {
                       <Badge variant="neutral">{levelLabel[skill.level]}</Badge>
                     </div>
                     {skill.subskills.length ? (
-                      <p className="mt-2 text-xs text-muted">
-                        Subskills: {skill.subskills.join(", ")}
+                      <p className="text-xs text-muted mb-2">
+                        {skill.subskills.join(" • ")}
                       </p>
                     ) : null}
                     <input
@@ -169,7 +155,7 @@ export default function OriginForm() {
                       min={0}
                       max={5}
                       value={skill.level}
-                      className="mt-3 w-full"
+                      className="w-full accent-cobalt"
                       onChange={(event) => {
                         const value = Number(event.target.value)
                         setSkills((prev) =>
@@ -183,40 +169,36 @@ export default function OriginForm() {
                 ))}
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-ink" htmlFor="customSkill">
-                  Add another prerequisite you want to work on
+              <div className="space-y-2 mt-4">
+                <label className="block text-sm font-semibold text-ink" htmlFor="customSkill">
+                  Add another skill
                 </label>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex gap-2">
                   <input
                     id="customSkill"
                     value={customSkill}
                     onChange={(event) => setCustomSkill(event.target.value)}
-                    className="h-11 flex-1 rounded-xl border border-peach/80 bg-paper px-4 text-sm text-ink"
-                    placeholder=""
+                    className="flex-1 h-11 rounded-xl border border-ink/10 bg-white/60 px-4 text-sm text-ink placeholder:text-muted/40 focus:outline-none focus:border-cobalt/50"
+                    placeholder="e.g., Linear Algebra"
                   />
                   <Button type="button" variant="outline" onClick={handleCustomSkill}>
-                    Add skill
+                    Add
                   </Button>
                 </div>
-                <p className="text-xs text-muted">
-                  We will search for sources whenever you move into a new skill unit.
-                </p>
               </div>
             </>
           )}
 
-          {message ? <p className="text-xs text-amber">{message}</p> : null}
-
-          <Button type="submit" size="lg" disabled={status === "loading"}>
-            {status === "loading"
-              ? "Working..."
-              : step === "origin"
-              ? "Map my prerequisites"
-              : "Start the journey"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+            {step === "skills" && message && (
+              <p className="text-sm text-amber">{message}</p>
+            )}
+            
+            {step === "skills" && (
+              <Button type="submit" size="lg" className="w-full mt-4" disabled={status === "loading"}>
+                {status === "loading" ? "Creating your path..." : "Start the journey →"}
+              </Button>
+            )}
+      </form>
+    </div>
   )
 }
