@@ -4,6 +4,10 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
+import GoogleDriveConnect, { GoogleDoc } from "@/components/GoogleDriveConnect"
+import ZoteroConnect, { ZoteroItem } from "@/components/ZoteroConnect"
+import { supabase, getGoogleAccessToken } from "@/lib/supabase"
+import LoadingSpinner from "@/components/LoadingSpinner"
 
 type KnowledgeNode = {
   label: string
@@ -16,38 +20,58 @@ type KnowledgeNode = {
   source_papers?: number[]
 }
 
-type Scene = "topic" | "background" | "papers"
+type Scene = "topic" | "background" | "notes" | "zotero" | "coursework"
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
 
-// Predefined decorative nodes for the background
-const DECORATIVE_NODES = [
-  { label: "Neurophysiology", x: 8, y: 12, z: 1, color: "blue" },
-  { label: "Cognitive Neuroscience", x: 25, y: 8, z: 2, color: "green" },
-  { label: "Brain Function", x: 15, y: 35, z: 1, color: "gray" },
-  { label: "The importance of sleep on the brain", x: 5, y: 55, z: 3, color: "blue" },
-  { label: "Memory Formation", x: 35, y: 22, z: 2, color: "green" },
-  { label: "Neural Plasticity", x: 12, y: 75, z: 1, color: "gray" },
-  { label: "Synaptic Transmission", x: 42, y: 45, z: 3, color: "blue" },
-  { label: "Cortical Mapping", x: 28, y: 65, z: 2, color: "green" },
-  { label: "Behavioral Psychology", x: 8, y: 88, z: 1, color: "gray" },
-  { label: "Learning Theory", x: 48, y: 78, z: 2, color: "blue" },
-  { label: "Motor Control", x: 55, y: 15, z: 1, color: "green" },
-  { label: "Sensory Processing", x: 52, y: 55, z: 3, color: "gray" },
-  { label: "Attention Networks", x: 18, y: 48, z: 2, color: "blue" },
-  { label: "Executive Function", x: 38, y: 85, z: 1, color: "green" },
+// Position configurations for displaying nodes
+const NODE_POSITIONS = [
+  { x: 8, y: 12, z: 1, color: "blue" },
+  { x: 25, y: 8, z: 2, color: "green" },
+  { x: 15, y: 35, z: 1, color: "gray" },
+  { x: 5, y: 55, z: 3, color: "blue" },
+  { x: 35, y: 22, z: 2, color: "green" },
+  { x: 12, y: 75, z: 1, color: "gray" },
+  { x: 42, y: 45, z: 3, color: "blue" },
+  { x: 28, y: 65, z: 2, color: "green" },
+  { x: 8, y: 88, z: 1, color: "gray" },
+  { x: 48, y: 78, z: 2, color: "blue" },
+  { x: 55, y: 15, z: 1, color: "green" },
+  { x: 52, y: 55, z: 3, color: "gray" },
+  { x: 18, y: 48, z: 2, color: "blue" },
+  { x: 38, y: 85, z: 1, color: "green" },
+]
+
+// Placeholder knowledge nodes shown on the first screen
+const PLACEHOLDER_NODES = [
+  { label: "Machine Learning", domain: "CS" },
+  { label: "Neural Networks", domain: "AI" },
+  { label: "Cognitive Science", domain: "Psychology" },
+  { label: "Statistical Analysis", domain: "Math" },
+  { label: "Research Methods", domain: "Academia" },
+  { label: "Data Visualization", domain: "Design" },
+  { label: "Natural Language", domain: "Linguistics" },
+  { label: "Reinforcement Learning", domain: "AI" },
+  { label: "Bayesian Inference", domain: "Statistics" },
+  { label: "Computer Vision", domain: "CS" },
+  { label: "Knowledge Graphs", domain: "AI" },
+  { label: "Human Memory", domain: "Neuroscience" },
+  { label: "Attention Mechanisms", domain: "Deep Learning" },
+  { label: "Transformers", domain: "NLP" },
 ]
 
 // Floating node component
-function FloatingNode({ 
-  label, 
-  x, 
-  y, 
-  z, 
-  color, 
+function FloatingNode({
+  label,
+  x,
+  y,
+  z,
+  color,
   delay,
-  isUserNode = false 
-}: { 
+  isUserNode = false,
+  relevance,
+  domain
+}: {
   label: string
   x: number
   y: number
@@ -55,7 +79,11 @@ function FloatingNode({
   color: string
   delay: number
   isUserNode?: boolean
+  relevance?: string
+  domain?: string
 }) {
+  const [isHovered, setIsHovered] = useState(false)
+
   const colorClasses = {
     blue: "bg-[#e3edf7] text-[#5a7a9a] border-[#d0e0ef]",
     green: "bg-[#e8f5ec] text-[#5a8a6a] border-[#d0eadb]",
@@ -65,53 +93,80 @@ function FloatingNode({
 
   const scaleByZ = 0.7 + (z * 0.15)
   const opacityByZ = isUserNode ? 0.95 : 0.4 + (z * 0.15)
-  
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.8, y: 20 }}
-      animate={{ 
+      animate={{
         opacity: opacityByZ,
         scale: scaleByZ,
         y: 0,
       }}
-      transition={{ 
-        duration: 0.8, 
+      transition={{
+        duration: 0.8,
         delay: delay,
         ease: "easeOut"
       }}
-      className="absolute pointer-events-none select-none"
-      style={{ 
-        left: `${x}%`, 
+      className={`absolute select-none ${isUserNode ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'}`}
+      style={{
+        left: `${x}%`,
         top: `${y}%`,
-        zIndex: z 
+        zIndex: isHovered ? 100 : z
       }}
+      onMouseEnter={() => isUserNode && setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
       <motion.div
         animate={{
-          y: [0, -6, 0],
-          rotate: [-0.5, 0.5, -0.5]
+          y: isHovered ? 0 : [0, -6, 0],
+          rotate: isHovered ? 0 : [-0.5, 0.5, -0.5]
         }}
         transition={{
-          duration: 4 + z * 2,
-          repeat: Infinity,
+          duration: isHovered ? 0.2 : 4 + z * 2,
+          repeat: isHovered ? 0 : Infinity,
           ease: "easeInOut",
-          delay: delay
+          delay: isHovered ? 0 : delay
         }}
       >
-        <div 
+        <div
           className={`
             px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap
-            border backdrop-blur-sm
+            border backdrop-blur-sm transition-all duration-200
             ${isUserNode ? colorClasses.user : colorClasses[color as keyof typeof colorClasses]}
+            ${isHovered ? 'ring-2 ring-blue-400 ring-opacity-50' : ''}
           `}
           style={{
-            boxShadow: isUserNode 
-              ? '0 4px 20px rgba(0,0,0,0.08)' 
+            boxShadow: isUserNode
+              ? isHovered
+                ? '0 8px 30px rgba(0,0,0,0.15)'
+                : '0 4px 20px rgba(0,0,0,0.08)'
               : '0 2px 8px rgba(0,0,0,0.04)'
           }}
         >
           {label}
+          {domain && <span className="ml-1 text-xs opacity-60">({domain})</span>}
         </div>
+
+        {/* Tooltip showing relevance to topic */}
+        <AnimatePresence>
+          {isHovered && relevance && (
+            <motion.div
+              initial={{ opacity: 0, y: -5, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -5, scale: 0.95 }}
+              transition={{ duration: 0.15 }}
+              className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-64 p-3 rounded-xl bg-white border border-gray-200 shadow-lg text-left"
+              style={{ zIndex: 101 }}
+            >
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                How this helps you learn
+              </p>
+              <p className="text-sm text-gray-700 leading-relaxed">
+                {relevance}
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </motion.div>
   )
@@ -171,31 +226,128 @@ export default function OnboardingPage() {
   const [scene, setScene] = useState<Scene>("topic")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Step transition state
+  const [isTransitioning, setIsTransitioning] = useState(false)
+  const [transitionKey, setTransitionKey] = useState(0) // Force new random icon on each transition
+
+  // Transition to next scene with loading animation
+  const transitionToScene = useCallback((nextScene: Scene, minDuration = 1200) => {
+    setIsTransitioning(true)
+    setTransitionKey(prev => prev + 1) // New random icon
+
+    setTimeout(() => {
+      setScene(nextScene)
+      setTimeout(() => {
+        setIsTransitioning(false)
+      }, 300) // Small delay to let content start rendering
+    }, minDuration)
+  }, [])
   
   // Knowledge graph state
   const [nodes, setNodes] = useState<KnowledgeNode[]>([])
-  
+  const [allNodes, setAllNodes] = useState<KnowledgeNode[]>([]) // All nodes from database (shown before topic entry)
+
   // Background scene state
   const [backgroundChoice, setBackgroundChoice] = useState<"cv" | "describe" | "skip" | null>(null)
   const [description, setDescription] = useState("")
   const cvRef = useRef<HTMLInputElement>(null)
   const [cvFile, setCvFile] = useState<File | null>(null)
   
+  // Notes scene state (Google Drive connection)
+  const [googleDriveConnected, setGoogleDriveConnected] = useState(false)
+  const [googleDocs, setGoogleDocs] = useState<GoogleDoc[]>([])
+
+  // Zotero connection state
+  const [zoteroConnected, setZoteroConnected] = useState(false)
+  const [zoteroItems, setZoteroItems] = useState<ZoteroItem[]>([])
+
   // Papers scene state
   const [paperLinks, setPaperLinks] = useState<string[]>([])
   const [currentLink, setCurrentLink] = useState("")
   const [paperFiles, setPaperFiles] = useState<File[]>([])
   const paperFileRef = useRef<HTMLInputElement>(null)
 
-  // Initialize user on mount
+  // Notes scene state
+  const [notesDescription, setNotesDescription] = useState("")
+  const [noteFiles, setNoteFiles] = useState<File[]>([])
+  const noteFileRef = useRef<HTMLInputElement>(null)
+
+  // Courses scene state
+  const [courses, setCourses] = useState<string[]>([])
+  const [currentCourse, setCurrentCourse] = useState("")
+
+  // Papers authored scene state (PDFs only)
+  const [authoredPaperFiles, setAuthoredPaperFiles] = useState<File[]>([])
+  const authoredPaperFileRef = useRef<HTMLInputElement>(null)
+
+  // Coursework scene state (URLs or transcript)
+  const [courseworkUrls, setCourseworkUrls] = useState<string[]>([])
+  const [currentCourseworkUrl, setCurrentCourseworkUrl] = useState("")
+  const [transcriptFile, setTranscriptFile] = useState<File | null>(null)
+  const transcriptFileRef = useRef<HTMLInputElement>(null)
+
+  // Initialize user on mount - restore state if returning from OAuth
   const [userReady, setUserReady] = useState(false)
-  
+
   useEffect(() => {
     const initUser = async () => {
       try {
+        // Check if we're returning from OAuth (URL hash has access_token or error)
+        const isOAuthReturn = window.location.hash.includes("access_token") ||
+                             window.location.hash.includes("error")
+
+        // Check for saved state in localStorage
+        const savedUserId = localStorage.getItem("onboarding_userId")
+        const savedSessionId = localStorage.getItem("sessionId")
+        const savedScene = localStorage.getItem("onboarding_scene") as Scene | null
+        const savedTopic = localStorage.getItem("onboarding_topic")
+
+        // Also check for saved nodes
+        const savedNodes = localStorage.getItem("onboarding_nodes")
+
+        if (isOAuthReturn && savedUserId && savedSessionId && savedScene) {
+          // Restore state from localStorage (returning from OAuth)
+          console.log("[Onboarding] OAuth return detected, restoring state from localStorage")
+          setUserId(parseInt(savedUserId, 10))
+          setSessionId(savedSessionId)
+          setScene(savedScene)
+          if (savedTopic) setCentralTopic(savedTopic)
+          if (savedNodes) {
+            try {
+              setNodes(JSON.parse(savedNodes))
+            } catch (e) {
+              console.error("Failed to parse saved nodes:", e)
+            }
+          }
+          setUserReady(true)
+          // NOTE: Do NOT clear the hash here - let GoogleDriveConnect read it first
+          return
+        }
+
+        // Check if we have existing state to restore (page refresh during onboarding)
+        if (savedUserId && savedSessionId && savedScene) {
+          setUserId(parseInt(savedUserId, 10))
+          setSessionId(savedSessionId)
+          setScene(savedScene)
+          if (savedTopic) setCentralTopic(savedTopic)
+          if (savedNodes) {
+            try {
+              setNodes(JSON.parse(savedNodes))
+            } catch (e) {
+              console.error("Failed to parse saved nodes:", e)
+            }
+          }
+          setUserReady(true)
+          return
+        }
+
+        // Fresh start - create new user
         const res = await fetch(`${API_BASE}/api/user/new`, { method: "POST" })
         const data = await res.json()
         setUserId(data.user_id)
+        // Save userId for OAuth flow and page refresh
+        localStorage.setItem("onboarding_userId", data.user_id.toString())
         setUserReady(true)
       } catch (e) {
         console.error("Failed to create user:", e)
@@ -204,6 +356,63 @@ export default function OnboardingPage() {
     }
     initUser()
   }, [])
+
+  // Save state to localStorage whenever scene, topic, or nodes change (for OAuth flow preservation)
+  useEffect(() => {
+    if (scene && scene !== "topic") {
+      localStorage.setItem("onboarding_scene", scene)
+    }
+    if (centralTopic) {
+      localStorage.setItem("onboarding_topic", centralTopic)
+    }
+  }, [scene, centralTopic])
+
+  // Save nodes to localStorage when they change
+  useEffect(() => {
+    if (nodes.length > 0) {
+      localStorage.setItem("onboarding_nodes", JSON.stringify(nodes))
+    }
+  }, [nodes])
+
+  // Clear onboarding state from localStorage when navigating away (onboarding complete)
+  useEffect(() => {
+    return () => {
+      // Only clear if we're navigating to lessons (onboarding complete)
+      // This is handled in navigate calls instead
+    }
+  }, [])
+
+  // Fetch all nodes from database on initial load (shown before topic entry)
+  useEffect(() => {
+    const fetchAllNodes = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("knowledge_nodes")
+          .select("label, domain, type, confidence, mastery_estimate, relevance_to_topic")
+          .order("created_at", { ascending: false })
+          .limit(14) // Limit to fit the position slots
+
+        if (error) {
+          console.error("Error fetching nodes:", error)
+          return
+        }
+
+        if (data) {
+          setAllNodes(data as KnowledgeNode[])
+        }
+      } catch (e) {
+        console.error("Failed to fetch nodes:", e)
+      }
+    }
+    fetchAllNodes()
+  }, [])
+
+  // Save nodes to localStorage whenever they change (for OAuth flow persistence)
+  useEffect(() => {
+    if (nodes.length > 0) {
+      localStorage.setItem("onboarding_nodes", JSON.stringify(nodes))
+    }
+  }, [nodes])
 
   // Scene 1: Topic submission
   const handleTopicSubmit = async (e: React.FormEvent) => {
@@ -226,9 +435,13 @@ export default function OnboardingPage() {
       })
       const data = await res.json()
       setSessionId(data.session_id)
-      
+      // Store state in localStorage for OAuth flow and page refresh
+      localStorage.setItem("sessionId", data.session_id)
+      localStorage.setItem("onboarding_topic", centralTopic)
+      localStorage.setItem("onboarding_scene", "background")
+
       setNodes([{ label: centralTopic, type: "concept", confidence: 1.0 }])
-      setScene("background")
+      transitionToScene("background")
     } catch (e) {
       setError("Failed to create session. Please try again.")
     } finally {
@@ -257,7 +470,8 @@ export default function OnboardingPage() {
       
       if (data.success) {
         setNodes(prev => [...prev, ...data.nodes])
-        setScene("papers")
+        localStorage.setItem("onboarding_scene", "notes")
+        transitionToScene("notes")
       } else {
         setError(data.error || "Failed to process CV")
       }
@@ -270,10 +484,10 @@ export default function OnboardingPage() {
 
   const handleDescriptionSubmit = async () => {
     if (!description.trim() || !sessionId || !userId) return
-    
+
     setIsLoading(true)
     setError(null)
-    
+
     try {
       const res = await fetch(`${API_BASE}/api/profile/background`, {
         method: "POST",
@@ -285,10 +499,11 @@ export default function OnboardingPage() {
         })
       })
       const data = await res.json()
-      
+
       if (data.success) {
         setNodes(prev => [...prev, ...data.nodes])
-        setScene("papers")
+        localStorage.setItem("onboarding_scene", "notes")
+        transitionToScene("notes")
       } else {
         setError(data.error || "Failed to process background")
       }
@@ -300,10 +515,267 @@ export default function OnboardingPage() {
   }
 
   const handleSkipBackground = () => {
-    setScene("papers")
+    localStorage.setItem("onboarding_scene", "notes")
+    transitionToScene("notes")
   }
 
-  // Scene 3: Papers submission
+  // Scene 3: Notes submission (Google Drive connection + papers you've written)
+  const handleNotesSubmit = async () => {
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      // Process Google Docs if any were selected
+      if (googleDocs.length > 0 && sessionId && userId) {
+        const accessToken = await getGoogleAccessToken()
+
+        const res = await fetch(`${API_BASE}/api/profile/google-docs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            documents: googleDocs,
+            session_id: sessionId,
+            user_id: userId,
+            access_token: accessToken
+          })
+        })
+        const data = await res.json()
+
+        if (data.success && data.nodes) {
+          setNodes(prev => [...prev, ...data.nodes])
+        }
+      }
+
+      // Process authored papers if any were uploaded
+      if (authoredPaperFiles.length > 0 && sessionId && userId) {
+        const formData = new FormData()
+        authoredPaperFiles.forEach(file => formData.append("files", file))
+        formData.append("session_id", sessionId)
+        formData.append("user_id", userId.toString())
+
+        const res = await fetch(`${API_BASE}/api/profile/papers-authored`, {
+          method: "POST",
+          body: formData
+        })
+        const data = await res.json()
+
+        if (data.success && data.nodes) {
+          setNodes(prev => [...prev, ...data.nodes])
+        }
+      }
+    } catch (e) {
+      console.error("Notes/papers submission error:", e)
+    } finally {
+      setIsLoading(false)
+    }
+
+    localStorage.setItem("onboarding_scene", "zotero")
+    transitionToScene("zotero")
+  }
+
+  const handleSkipNotes = () => {
+    localStorage.setItem("onboarding_scene", "zotero")
+    transitionToScene("zotero")
+  }
+
+  // Scene 4: Zotero submission
+  const handleZoteroSubmit = async () => {
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      // Process Zotero items if any were selected
+      if (zoteroItems.length > 0 && sessionId && userId) {
+        const res = await fetch(`${API_BASE}/api/profile/zotero-items`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: zoteroItems,
+            session_id: sessionId,
+            user_id: userId
+          })
+        })
+        const data = await res.json()
+
+        if (data.success && data.nodes) {
+          setNodes(prev => [...prev, ...data.nodes])
+        }
+      }
+
+      // Process uploaded paper files if any
+      if (paperFiles.length > 0 && sessionId && userId) {
+        const formData = new FormData()
+        paperFiles.forEach(file => formData.append("files", file))
+        formData.append("session_id", sessionId)
+        formData.append("user_id", userId.toString())
+
+        const res = await fetch(`${API_BASE}/api/profile/papers-authored`, {
+          method: "POST",
+          body: formData
+        })
+        const data = await res.json()
+
+        if (data.success && data.nodes) {
+          setNodes(prev => [...prev, ...data.nodes])
+        }
+      }
+    } catch (e) {
+      console.error("Zotero submission error:", e)
+    } finally {
+      setIsLoading(false)
+    }
+
+    localStorage.setItem("onboarding_scene", "coursework")
+    transitionToScene("coursework")
+  }
+
+  const handleSkipZotero = () => {
+    localStorage.setItem("onboarding_scene", "coursework")
+    transitionToScene("coursework")
+  }
+
+  // Legacy: Papers authored submission (PDFs only)
+  const addAuthoredPaperFiles = (files: FileList | null) => {
+    if (files) {
+      const pdfFiles = Array.from(files).filter(f => f.type === "application/pdf")
+      setAuthoredPaperFiles(prev => [...prev, ...pdfFiles])
+    }
+  }
+
+  const removeAuthoredPaperFile = (index: number) => {
+    setAuthoredPaperFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handlePapersAuthoredSubmit = async () => {
+    if (authoredPaperFiles.length === 0 || !sessionId || !userId) {
+      localStorage.setItem("onboarding_scene", "coursework")
+      transitionToScene("coursework")
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const formData = new FormData()
+      authoredPaperFiles.forEach(file => formData.append("files", file))
+      formData.append("session_id", sessionId)
+      formData.append("user_id", userId.toString())
+
+      const res = await fetch(`${API_BASE}/api/profile/papers-authored`, {
+        method: "POST",
+        body: formData
+      })
+      const data = await res.json()
+
+      if (data.success && data.nodes) {
+        setNodes(prev => [...prev, ...data.nodes])
+      } else if (!data.success) {
+        setError(data.error || "Failed to process papers")
+      }
+
+      localStorage.setItem("onboarding_scene", "coursework")
+      transitionToScene("coursework")
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to upload papers. Please try again.")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleSkipPapersAuthored = () => {
+    localStorage.setItem("onboarding_scene", "coursework")
+    transitionToScene("coursework")
+  }
+
+  // Scene 5: Coursework submission (URLs via Firecrawl or transcript)
+  const addCourseworkUrl = () => {
+    if (currentCourseworkUrl.trim()) {
+      setCourseworkUrls(prev => [...prev, currentCourseworkUrl.trim()])
+      setCurrentCourseworkUrl("")
+    }
+  }
+
+  const removeCourseworkUrl = (index: number) => {
+    setCourseworkUrls(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleCourseworkSubmit = async () => {
+    if (courseworkUrls.length === 0 && !transcriptFile) {
+      // No coursework added, complete onboarding
+      clearOnboardingState()
+      navigate("/lessons")
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      let allNewNodes: KnowledgeNode[] = []
+
+      // Process coursework URLs via Firecrawl
+      if (courseworkUrls.length > 0 && sessionId && userId) {
+        const res = await fetch(`${API_BASE}/api/profile/coursework-urls`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            urls: courseworkUrls,
+            session_id: sessionId,
+            user_id: userId
+          })
+        })
+        const data = await res.json()
+
+        if (data.success && data.nodes) {
+          allNewNodes = [...allNewNodes, ...data.nodes]
+        }
+      }
+
+      // Process transcript if uploaded
+      if (transcriptFile && sessionId && userId) {
+        const formData = new FormData()
+        formData.append("file", transcriptFile)
+        formData.append("session_id", sessionId)
+        formData.append("user_id", userId.toString())
+
+        const res = await fetch(`${API_BASE}/api/profile/coursework-transcript`, {
+          method: "POST",
+          body: formData
+        })
+        const data = await res.json()
+
+        if (data.success && data.nodes) {
+          allNewNodes = [...allNewNodes, ...data.nodes]
+        }
+      }
+
+      if (allNewNodes.length > 0) {
+        setNodes(prev => [...prev, ...allNewNodes])
+      }
+
+      clearOnboardingState()
+      navigate("/lessons")
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to process coursework. Please try again.")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleSkipCoursework = () => {
+    clearOnboardingState()
+    navigate("/lessons")
+  }
+
+  const clearOnboardingState = () => {
+    localStorage.removeItem("onboarding_scene")
+    localStorage.removeItem("onboarding_topic")
+    localStorage.removeItem("onboarding_userId")
+    localStorage.removeItem("onboarding_nodes")
+  }
+
+  // Legacy handlers for old scenes (papers, courses, old notes) - kept for backward compatibility
   const addPaperLink = () => {
     if (currentLink.trim()) {
       setPaperLinks(prev => [...prev, currentLink.trim()])
@@ -326,68 +798,76 @@ export default function OnboardingPage() {
   }
 
   const handlePapersSubmit = async () => {
-    if ((paperLinks.length === 0 && paperFiles.length === 0) || !sessionId || !userId) return
-    
-    setIsLoading(true)
-    setError(null)
-    
-    try {
-      let allNodes: KnowledgeNode[] = []
-      
-      if (paperLinks.length > 0) {
-        const res = await fetch(`${API_BASE}/api/profile/papers`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            papers: paperLinks.map(url => ({ url, title: url })),
-            session_id: sessionId,
-            user_id: userId
-          })
-        })
-        const data = await res.json()
-        
-        if (data.success && data.nodes) {
-          allNodes = [...allNodes, ...data.nodes]
-        } else if (!data.success) {
-          throw new Error(data.error || "Failed to process paper links")
-        }
-      }
-      
-      for (const file of paperFiles) {
-        const formData = new FormData()
-        formData.append("file", file)
-        formData.append("session_id", sessionId)
-        formData.append("user_id", userId.toString())
-        formData.append("title", file.name.replace(/\.[^/.]+$/, ""))
-        
-        const res = await fetch(`${API_BASE}/api/profile/paper-file`, {
-          method: "POST",
-          body: formData
-        })
-        const data = await res.json()
-        
-        if (data.success && data.nodes) {
-          allNodes = [...allNodes, ...data.nodes]
-        }
-      }
-      
-      if (allNodes.length > 0) {
-        setNodes(prev => [...prev, ...allNodes])
-      }
-      
-      navigate("/lessons")
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to submit papers. Please try again.")
-    } finally {
-      setIsLoading(false)
-    }
+    // Legacy - go to zotero
+    localStorage.setItem("onboarding_scene", "zotero")
+    transitionToScene("zotero")
   }
 
   const handleSkipPapers = () => {
-    navigate("/lessons")
+    localStorage.setItem("onboarding_scene", "zotero")
+    transitionToScene("zotero")
   }
 
-  // Generate user nodes with positions
+  const addCourse = () => {
+    if (currentCourse.trim()) {
+      setCourses(prev => [...prev, currentCourse.trim()])
+      setCurrentCourse("")
+    }
+  }
+
+  const removeCourse = (index: number) => {
+    setCourses(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleCoursesSubmit = async () => {
+    localStorage.setItem("onboarding_scene", "coursework")
+    transitionToScene("coursework")
+  }
+
+  const handleSkipCourses = () => {
+    localStorage.setItem("onboarding_scene", "coursework")
+    transitionToScene("coursework")
+  }
+
+  const addNoteFiles = (files: FileList | null) => {
+    if (files) {
+      setNoteFiles(prev => [...prev, ...Array.from(files)])
+    }
+  }
+
+  const removeNoteFile = (index: number) => {
+    setNoteFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  // Generate placeholder nodes for the first screen (topic entry)
+  const placeholderNodes = useMemo(() => {
+    return PLACEHOLDER_NODES.map((node, i) => ({
+      label: node.label,
+      domain: node.domain,
+      x: NODE_POSITIONS[i % NODE_POSITIONS.length].x,
+      y: NODE_POSITIONS[i % NODE_POSITIONS.length].y,
+      z: NODE_POSITIONS[i % NODE_POSITIONS.length].z,
+      color: NODE_POSITIONS[i % NODE_POSITIONS.length].color,
+      delay: 0.2 + i * 0.12
+    }))
+  }, [])
+
+  // Generate background nodes from database (shown before topic entry if available)
+  const backgroundNodes = useMemo(() => {
+    // Use placeholder nodes if no database nodes available
+    const nodesToShow = allNodes.length > 0 ? allNodes : PLACEHOLDER_NODES
+    return nodesToShow.map((node, i) => ({
+      label: node.label,
+      domain: node.domain,
+      x: NODE_POSITIONS[i % NODE_POSITIONS.length].x,
+      y: NODE_POSITIONS[i % NODE_POSITIONS.length].y,
+      z: NODE_POSITIONS[i % NODE_POSITIONS.length].z,
+      color: NODE_POSITIONS[i % NODE_POSITIONS.length].color,
+      delay: 0.2 + i * 0.12
+    }))
+  }, [allNodes])
+
+  // Generate user nodes with positions (shown after topic entry)
   const userNodes = useMemo(() => {
     return nodes.map((node, i) => ({
       ...node,
@@ -420,23 +900,26 @@ export default function OnboardingPage() {
       {/* Left 2/3: Knowledge Graph Visualization */}
       <div className="absolute inset-y-0 left-0 w-2/3 overflow-hidden">
         <ConnectionLines />
-        
-        {/* Decorative background nodes */}
-        {DECORATIVE_NODES.map((node, i) => (
-          <FloatingNode
-            key={`decorative-${i}`}
-            label={node.label}
-            x={node.x}
-            y={node.y}
-            z={node.z}
-            color={node.color}
-            delay={0.1 + i * 0.08}
-          />
-        ))}
-        
-        {/* User-generated nodes */}
+
+        {/* Placeholder knowledge nodes - shown on the topic entry screen */}
         <AnimatePresence>
-          {userNodes.map((node, i) => (
+          {scene === "topic" && placeholderNodes.map((node, i) => (
+            <FloatingNode
+              key={`placeholder-${i}-${node.label}`}
+              label={node.label}
+              x={node.x}
+              y={node.y}
+              z={node.z}
+              color={node.color}
+              delay={node.delay}
+              domain={node.domain}
+            />
+          ))}
+        </AnimatePresence>
+
+        {/* User-generated nodes - shown AFTER topic entry */}
+        <AnimatePresence>
+          {sessionId && userNodes.map((node, i) => (
             <FloatingNode
               key={`user-${i}-${node.label}`}
               label={node.label}
@@ -446,6 +929,8 @@ export default function OnboardingPage() {
               color="user"
               delay={node.delay}
               isUserNode={true}
+              relevance={node.relevance_to_topic}
+              domain={node.domain}
             />
           ))}
         </AnimatePresence>
@@ -677,10 +1162,37 @@ export default function OnboardingPage() {
                   Add papers you've read
                 </h2>
                 <p className="text-gray-500 text-sm mb-6">
-                  Paste arXiv/DOI links or upload PDFs
+                  Connect Google Drive, paste arXiv/DOI links, or upload PDFs
                 </p>
-                
+
                 <div className="space-y-4">
+                  {/* Google Drive Connection */}
+                  {userId && sessionId && (
+                    <GoogleDriveConnect
+                      userId={userId}
+                      sessionId={sessionId}
+                      onConnect={setGoogleDriveConnected}
+                      onDocumentsSelected={setGoogleDocs}
+                    />
+                  )}
+
+                  {/* Zotero Connection */}
+                  {userId && (
+                    <ZoteroConnect
+                      userId={userId}
+                      onConnect={setZoteroConnected}
+                      onSelectionChange={setZoteroItems}
+                    />
+                  )}
+
+                  {/* Divider */}
+                  {(googleDriveConnected || zoteroConnected) && (
+                    <div className="flex items-center gap-3 py-2">
+                      <div className="flex-1 h-px bg-gray-200" />
+                      <span className="text-xs text-gray-400">or add manually</span>
+                      <div className="flex-1 h-px bg-gray-200" />
+                    </div>
+                  )}
                   {/* Paper link input */}
                   <div className="flex gap-2">
                     <input
@@ -760,13 +1272,422 @@ export default function OnboardingPage() {
                     </Button>
                     <Button
                       onClick={handlePapersSubmit}
-                      disabled={(paperLinks.length === 0 && paperFiles.length === 0) || isLoading}
+                      disabled={(paperLinks.length === 0 && paperFiles.length === 0 && googleDocs.length === 0 && zoteroItems.length === 0) || isLoading}
                       className="flex-1 bg-gray-800 hover:bg-gray-700"
                     >
-                      {isLoading ? "Analyzing..." : `Continue${(paperLinks.length + paperFiles.length) > 0 ? ` (${paperLinks.length + paperFiles.length})` : ""}`}
+                      {isLoading ? "Analyzing..." : `Continue${(paperLinks.length + paperFiles.length + googleDocs.length + zoteroItems.length) > 0 ? ` (${paperLinks.length + paperFiles.length + googleDocs.length + zoteroItems.length})` : ""}`}
                     </Button>
                   </div>
                   
+                  {error && <p className="text-sm text-red-500 mt-4">{error}</p>}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Scene 4: Courses & Academic History */}
+          {scene === "courses" && (
+            <motion.div
+              key="courses"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.4 }}
+              className="w-full max-w-md"
+            >
+              <div
+                className="p-8 rounded-2xl bg-white/95 backdrop-blur-sm border border-gray-100"
+                style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.06)' }}
+              >
+                <h2 className="font-serif text-2xl text-gray-800 mb-2">
+                  What courses have you taken?
+                </h2>
+                <p className="text-gray-500 text-sm mb-6">
+                  Add relevant classes, certifications, or academic programs
+                </p>
+
+                <div className="space-y-4">
+                  {/* Course input */}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={currentCourse}
+                      onChange={(e) => setCurrentCourse(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCourse())}
+                      placeholder="e.g., CS 229 Machine Learning, MIT 6.006..."
+                      className="flex-1 px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-gray-400 text-sm"
+                      autoFocus
+                    />
+                    <Button
+                      onClick={addCourse}
+                      disabled={!currentCourse.trim()}
+                      variant="outline"
+                    >
+                      Add
+                    </Button>
+                  </div>
+
+                  {/* Quick add suggestions */}
+                  <div className="flex flex-wrap gap-2">
+                    {["Linear Algebra", "Calculus", "Statistics", "Programming", "Data Structures"].map((suggestion) => (
+                      !courses.includes(suggestion) && (
+                        <button
+                          key={suggestion}
+                          onClick={() => setCourses(prev => [...prev, suggestion])}
+                          className="px-3 py-1 text-xs rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+                        >
+                          + {suggestion}
+                        </button>
+                      )
+                    ))}
+                  </div>
+
+                  {/* Courses list */}
+                  {courses.length > 0 && (
+                    <div className="space-y-2 max-h-32 overflow-y-auto">
+                      {courses.map((course, i) => (
+                        <div key={`course-${i}`} className="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200">
+                          <span className="text-sm">📚</span>
+                          <span className="flex-1 text-sm text-gray-700">{course}</span>
+                          <button
+                            onClick={() => removeCourse(i)}
+                            className="text-gray-400 hover:text-gray-600"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 pt-2">
+                    <Button variant="outline" onClick={handleSkipCourses} className="flex-1">
+                      Skip
+                    </Button>
+                    <Button
+                      onClick={handleCoursesSubmit}
+                      disabled={isLoading}
+                      className="flex-1 bg-gray-800 hover:bg-gray-700"
+                    >
+                      {isLoading ? "Processing..." : `Continue${courses.length > 0 ? ` (${courses.length})` : ""}`}
+                    </Button>
+                  </div>
+
+                  {error && <p className="text-sm text-red-500 mt-4">{error}</p>}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Scene 3: Notes (Google Drive Connection + Papers You've Written) */}
+          {scene === "notes" && (
+            <motion.div
+              key="notes"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.4 }}
+              className="w-full max-w-md"
+            >
+              <div
+                className="p-8 rounded-2xl bg-white/95 backdrop-blur-sm border border-gray-100"
+                style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.06)' }}
+              >
+                <h2 className="font-serif text-2xl text-gray-800 mb-2">
+                  Connect your notes & papers
+                </h2>
+                <p className="text-gray-500 text-sm mb-6">
+                  Import documents from Google Drive or upload papers you've written
+                </p>
+
+                <div className="space-y-4">
+                  {/* Google Drive Connection */}
+                  {userId && sessionId && (
+                    <GoogleDriveConnect
+                      userId={userId}
+                      sessionId={sessionId}
+                      onConnect={setGoogleDriveConnected}
+                      onDocumentsSelected={setGoogleDocs}
+                    />
+                  )}
+
+                  {/* Selected docs count */}
+                  {googleDocs.length > 0 && (
+                    <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">
+                      {googleDocs.length} document{googleDocs.length > 1 ? 's' : ''} selected from Google Drive
+                    </div>
+                  )}
+
+                  {/* Divider */}
+                  <div className="flex items-center gap-3 py-2">
+                    <div className="flex-1 h-px bg-gray-200" />
+                    <span className="text-xs text-gray-400">or upload papers</span>
+                    <div className="flex-1 h-px bg-gray-200" />
+                  </div>
+
+                  {/* PDF Upload for papers you've written */}
+                  <input
+                    type="file"
+                    ref={authoredPaperFileRef}
+                    accept=".pdf"
+                    multiple
+                    onChange={(e) => addAuthoredPaperFiles(e.target.files)}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => authoredPaperFileRef.current?.click()}
+                    className="w-full p-4 rounded-xl border-2 border-dashed border-gray-300 hover:border-gray-400 transition-all text-gray-500 hover:text-gray-600 flex flex-col items-center justify-center gap-2"
+                  >
+                    <span className="text-xl">📄</span>
+                    <span>Upload papers you've written (PDF)</span>
+                  </button>
+
+                  {/* Authored paper files list */}
+                  {authoredPaperFiles.length > 0 && (
+                    <div className="space-y-2 max-h-24 overflow-y-auto">
+                      {authoredPaperFiles.map((file, i) => (
+                        <div key={`authored-${i}`} className="flex items-center gap-2 p-3 rounded-lg bg-purple-50 border border-purple-200">
+                          <span className="text-sm">📄</span>
+                          <span className="flex-1 text-sm text-gray-700 truncate">{file.name}</span>
+                          <span className="text-xs text-gray-500">{(file.size / 1024 / 1024).toFixed(1)} MB</span>
+                          <button
+                            onClick={() => removeAuthoredPaperFile(i)}
+                            className="text-gray-400 hover:text-gray-600"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 pt-2">
+                    <Button variant="outline" onClick={handleSkipNotes} className="flex-1">
+                      Skip
+                    </Button>
+                    <Button
+                      onClick={handleNotesSubmit}
+                      disabled={isLoading}
+                      className="flex-1 bg-gray-800 hover:bg-gray-700"
+                    >
+                      {isLoading ? "Processing..." : "Continue"}
+                    </Button>
+                  </div>
+
+                  {error && <p className="text-sm text-red-500 mt-4">{error}</p>}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Scene 4: Zotero (Import from Zotero + upload papers) */}
+          {scene === "zotero" && (
+            <motion.div
+              key="zotero"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.4 }}
+              className="w-full max-w-md"
+            >
+              <div
+                className="p-8 rounded-2xl bg-white/95 backdrop-blur-sm border border-gray-100"
+                style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.06)' }}
+              >
+                <h2 className="font-serif text-2xl text-gray-800 mb-2">
+                  Import from Zotero
+                </h2>
+                <p className="text-gray-500 text-sm mb-6">
+                  Connect your Zotero library or upload papers you've written
+                </p>
+
+                <div className="space-y-4">
+                  {/* Zotero Connection */}
+                  {userId && (
+                    <ZoteroConnect
+                      userId={userId}
+                      onConnect={setZoteroConnected}
+                      onSelectionChange={setZoteroItems}
+                    />
+                  )}
+
+                  {/* Selected Zotero items count */}
+                  {zoteroItems.length > 0 && (
+                    <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+                      {zoteroItems.length} item{zoteroItems.length > 1 ? 's' : ''} selected from Zotero
+                    </div>
+                  )}
+
+                  {/* Divider */}
+                  <div className="flex items-center gap-3 py-2">
+                    <div className="flex-1 h-px bg-gray-200" />
+                    <span className="text-xs text-gray-400">or upload papers</span>
+                    <div className="flex-1 h-px bg-gray-200" />
+                  </div>
+
+                  {/* PDF Upload */}
+                  <input
+                    type="file"
+                    ref={paperFileRef}
+                    accept=".pdf"
+                    multiple
+                    onChange={(e) => addPaperFiles(e.target.files)}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => paperFileRef.current?.click()}
+                    className="w-full p-4 rounded-xl border-2 border-dashed border-gray-300 hover:border-gray-400 transition-all text-gray-500 hover:text-gray-600 flex flex-col items-center justify-center gap-2"
+                  >
+                    <span className="text-xl">📄</span>
+                    <span>Upload papers you've written (PDF)</span>
+                  </button>
+
+                  {/* Paper files list */}
+                  {paperFiles.length > 0 && (
+                    <div className="space-y-2 max-h-24 overflow-y-auto">
+                      {paperFiles.map((file, i) => (
+                        <div key={`paper-${i}`} className="flex items-center gap-2 p-3 rounded-lg bg-purple-50 border border-purple-200">
+                          <span className="text-sm">📄</span>
+                          <span className="flex-1 text-sm text-gray-700 truncate">{file.name}</span>
+                          <span className="text-xs text-gray-500">{(file.size / 1024 / 1024).toFixed(1)} MB</span>
+                          <button
+                            onClick={() => removePaperFile(i)}
+                            className="text-gray-400 hover:text-gray-600"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 pt-2">
+                    <Button variant="outline" onClick={handleSkipZotero} className="flex-1">
+                      Skip
+                    </Button>
+                    <Button
+                      onClick={handleZoteroSubmit}
+                      disabled={isLoading}
+                      className="flex-1 bg-gray-800 hover:bg-gray-700"
+                    >
+                      {isLoading ? "Processing..." : "Continue"}
+                    </Button>
+                  </div>
+
+                  {error && <p className="text-sm text-red-500 mt-4">{error}</p>}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Scene 5: Coursework (URLs via Firecrawl or transcript) */}
+          {scene === "coursework" && (
+            <motion.div
+              key="coursework"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.4 }}
+              className="w-full max-w-md"
+            >
+              <div
+                className="p-8 rounded-2xl bg-white/95 backdrop-blur-sm border border-gray-100"
+                style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.06)' }}
+              >
+                <h2 className="font-serif text-2xl text-gray-800 mb-2">
+                  Add your coursework
+                </h2>
+                <p className="text-gray-500 text-sm mb-6">
+                  Link course websites or upload your academic transcript
+                </p>
+
+                <div className="space-y-4">
+                  {/* Course URL input */}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={currentCourseworkUrl}
+                      onChange={(e) => setCurrentCourseworkUrl(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCourseworkUrl())}
+                      placeholder="https://coursera.org/learn/... or course website"
+                      className="flex-1 px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-gray-400 text-sm"
+                    />
+                    <Button
+                      onClick={addCourseworkUrl}
+                      disabled={!currentCourseworkUrl.trim()}
+                      variant="outline"
+                    >
+                      Add
+                    </Button>
+                  </div>
+
+                  {/* Coursework URLs list */}
+                  {courseworkUrls.length > 0 && (
+                    <div className="space-y-2 max-h-24 overflow-y-auto">
+                      {courseworkUrls.map((url, i) => (
+                        <div key={`url-${i}`} className="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200">
+                          <span className="text-sm text-blue-500">🔗</span>
+                          <span className="flex-1 text-sm text-gray-700 truncate">{url}</span>
+                          <button
+                            onClick={() => removeCourseworkUrl(i)}
+                            className="text-gray-400 hover:text-gray-600"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Divider */}
+                  <div className="flex items-center gap-3 py-2">
+                    <div className="flex-1 h-px bg-gray-200" />
+                    <span className="text-xs text-gray-400">or upload transcript</span>
+                    <div className="flex-1 h-px bg-gray-200" />
+                  </div>
+
+                  {/* Transcript upload */}
+                  <input
+                    type="file"
+                    ref={transcriptFileRef}
+                    accept=".pdf"
+                    onChange={(e) => setTranscriptFile(e.target.files?.[0] || null)}
+                    className="hidden"
+                  />
+                  {transcriptFile ? (
+                    <div className="flex items-center gap-3 p-4 rounded-xl bg-green-50 border border-green-200">
+                      <span className="text-lg">✅</span>
+                      <span className="flex-1 text-sm text-gray-700 truncate">{transcriptFile.name}</span>
+                      <button
+                        onClick={() => setTranscriptFile(null)}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => transcriptFileRef.current?.click()}
+                      className="w-full p-4 rounded-xl border-2 border-dashed border-gray-300 hover:border-gray-400 transition-all text-gray-500 hover:text-gray-600 flex items-center justify-center gap-2"
+                    >
+                      <span>📋</span>
+                      <span>Upload academic transcript (PDF)</span>
+                    </button>
+                  )}
+
+                  <div className="flex gap-3 pt-2">
+                    <Button variant="outline" onClick={handleSkipCoursework} className="flex-1">
+                      Skip
+                    </Button>
+                    <Button
+                      onClick={handleCourseworkSubmit}
+                      disabled={isLoading}
+                      className="flex-1 bg-gray-800 hover:bg-gray-700"
+                    >
+                      {isLoading ? "Finishing..." : "Complete Setup"}
+                    </Button>
+                  </div>
+
                   {error && <p className="text-sm text-red-500 mt-4">{error}</p>}
                 </div>
               </div>
@@ -778,7 +1699,7 @@ export default function OnboardingPage() {
       {/* Node count indicator */}
       <AnimatePresence>
         {nodes.length > 0 && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
@@ -788,6 +1709,33 @@ export default function OnboardingPage() {
             <span className="text-sm text-gray-600">
               <strong className="text-gray-800">{nodes.length}</strong> knowledge nodes
             </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Step transition overlay with random spinning icon */}
+      <AnimatePresence>
+        {isTransitioning && (
+          <motion.div
+            key={`transition-${transitionKey}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            style={{
+              background: 'linear-gradient(135deg, rgba(232, 244, 248, 0.97) 0%, rgba(238, 246, 244, 0.97) 40%, rgba(232, 248, 240, 0.97) 100%)',
+              backdropFilter: 'blur(8px)'
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+            >
+              <LoadingSpinner key={transitionKey} size={140} random />
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

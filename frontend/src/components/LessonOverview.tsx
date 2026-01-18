@@ -1,9 +1,9 @@
-import { Link } from "react-router-dom"
 import { useEffect, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import TransitionLink from "@/components/TransitionLink"
 import type { LessonPlan } from "@/lib/lesson-plan"
 
 export default function LessonOverview() {
@@ -25,15 +25,15 @@ export default function LessonOverview() {
       <div className="rounded-3xl border border-peach/60 bg-white/80 p-8 shadow-float">
         <Badge>No lesson plan yet</Badge>
         <h1 className="mt-4 font-serif text-3xl text-ink">
-          Create your learning origin first
+          Create your learning path first
         </h1>
         <p className="mt-3 text-base text-muted">
-          Start by building your learning origin so we can generate a personalized lesson
-          path based on your background and goals.
+          Start by building your learning path so we can generate a personalized lesson
+          plan based on your background and goals.
         </p>
         <div className="mt-5">
           <Button asChild>
-            <Link to="/origin">Build learning origin</Link>
+            <TransitionLink to="/learn">Build learning path</TransitionLink>
           </Button>
         </div>
       </div>
@@ -68,12 +68,12 @@ export default function LessonOverview() {
         ) : null}
         <div className="mt-5 flex flex-wrap gap-3">
           <Button asChild>
-            <Link to={`/lessons/${primaryUnit?.lessons[0]?.id ?? "lesson-1"}`}>
+            <TransitionLink to={`/lessons/${primaryUnit?.lessons[0]?.id ?? "lesson-1"}`}>
               Start first lesson
-            </Link>
+            </TransitionLink>
           </Button>
           <Button variant="outline" asChild>
-            <Link to="/origin">Refine learning origin</Link>
+            <TransitionLink to="/learn">Refine learning path</TransitionLink>
           </Button>
         </div>
       </div>
@@ -89,7 +89,7 @@ export default function LessonOverview() {
               <p>{unit.description}</p>
               <div className="space-y-2">
                 {unit.lessons.map((lesson) => (
-                  <Link
+                  <TransitionLink
                     key={lesson.id}
                     to={`/lessons/${lesson.id}`}
                     className="flex items-center justify-between rounded-xl border border-peach/50 bg-white/70 px-3 py-2 text-sm text-ink hover:border-ink/40"
@@ -98,7 +98,7 @@ export default function LessonOverview() {
                     <span className="text-xs uppercase tracking-[0.2em] text-muted">
                       {lesson.type}
                     </span>
-                  </Link>
+                  </TransitionLink>
                 ))}
               </div>
             </CardContent>

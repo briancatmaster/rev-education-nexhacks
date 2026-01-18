@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom"
+import TransitionLink from "@/components/TransitionLink"
 import { Button } from "@/components/ui/button"
 import SchoolCarousel from "@/components/school-carousel"
 
@@ -21,9 +21,9 @@ export default function HomePage() {
             exists so learning stays rigorous without leaving the platform.
           </p>
           <div className="pt-4">
-            <Link to="/onboarding">
+            <TransitionLink to="/onboarding">
               <Button size="lg">Begin learning</Button>
-            </Link>
+            </TransitionLink>
           </div>
         </div>
       </section>

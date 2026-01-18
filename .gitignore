@@ -10,3 +10,5 @@ backend/**/__pycache__/
 backend/**/*.pyc
 .next/
 .next
+.mcp.json
+.claude/settings.local.json

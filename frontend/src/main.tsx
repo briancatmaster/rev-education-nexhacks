@@ -11,11 +11,17 @@ import HomePage from './pages/Home'
 import OnboardingPage from './pages/Onboarding'
 import LessonsPage from './pages/Lessons'
 import LessonDetailPage from './pages/LessonDetail'
+import ZoteroCallbackPage from './pages/ZoteroCallback'
+import { TransitionProvider } from './context/TransitionContext'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
+      <TransitionProvider>
       <Routes>
+        {/* OAuth callback routes (outside layouts for popup use) */}
+        <Route path="/zotero/callback" element={<ZoteroCallbackPage />} />
+
         <Route element={<RootLayout />}>
           <Route element={<SiteLayout />}>
             <Route path="/" element={<HomePage />} />
@@ -27,6 +33,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           </Route>
         </Route>
       </Routes>
+      </TransitionProvider>
     </BrowserRouter>
   </React.StrictMode>
 )

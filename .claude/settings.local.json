@@ -1,7 +1,50 @@
 {
   "permissions": {
     "allow": [
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(npx -y @modelcontextprotocol/server-postgres --version)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "mcp__postgres__query",
+      "WebFetch(domain:thetokencompany.com)",
+      "Bash(claude mcp add:*)",
+      "mcp__supabase__apply_migration",
+      "mcp__supabase__execute_sql",
+      "mcp__supabase__list_tables",
+      "WebFetch(domain:parse.bot)",
+      "WebSearch",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:www.ycombinator.com)",
+      "WebFetch(domain:www.zotero.org)",
+      "WebFetch(domain:www.linkedin.com)",
+      "mcp__supabase__get_advisors",
+      "mcp__supabase__search_docs",
+      "WebFetch(domain:developers.google.com)",
+      "mcp__supabase__get_logs",
+      "Bash(pip install:*)",
+      "WebFetch(domain:supabase.com)",
+      "Bash(open -a \"Google Chrome\" \"https://www.parse.bot/\")",
+      "Bash(git checkout:*)",
+      "WebFetch(domain:www.parse.bot)",
+      "WebFetch(domain:api.parse.bot)",
+      "Bash(find:*)",
+      "Bash(curl:*)",
+      "Bash(grep:*)",
+      "Bash(python3:*)",
+      "Bash(npm run build:*)",
+      "WebFetch(domain:docs.firecrawl.dev)",
+      "Bash(npx vite build:*)",
+      "Bash(source venv/bin/activate)",
+      "mcp__supabase__list_migrations",
+      "Bash(source .venv/bin/activate)",
+      "Bash(uvicorn:*)",
+      "Bash(python -c:*)",
+      "Bash(python workers/document_worker.py:*)"
     ]
-  }
+  },
+  "model": "claude-opus-4-5-20251101",
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "postgres"
+  ]
 }

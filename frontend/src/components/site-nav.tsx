@@ -6,7 +6,7 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 
 const navLinks = [
-  { href: "/origin", label: "Learning Origin" },
+  { href: "/learn", label: "Create Learning Path" },
   { href: "/lessons", label: "Lessons" },
 ]
 

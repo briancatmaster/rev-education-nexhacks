@@ -7,3 +7,11 @@ python-multipart>=0.0.6
 pydantic>=2.0.0
 google-generativeai>=0.4.0
 websockets>=13.0
+
+# Document Processing (Token Company Integration)
+PyMuPDF>=1.23.0          # PDF text and image extraction
+tokenc>=0.1.0            # Token Company SDK for compression
+Pillow>=10.0.0           # Image processing support
+
+# MCP Server
+mcp>=0.1.0               # Model Context Protocol SDK

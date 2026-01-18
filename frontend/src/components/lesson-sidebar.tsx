@@ -1,7 +1,8 @@
-import { Link, useLocation } from "react-router-dom"
+import { useLocation } from "react-router-dom"
 import { useEffect, useMemo, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
+import TransitionLink from "@/components/TransitionLink"
 import type { LessonPlan } from "@/lib/lesson-plan"
 
 const lessonTypeLabel = {
@@ -44,7 +45,7 @@ export default function LessonSidebar({ compact = false }: { compact?: boolean }
             Lesson track
           </p>
           <h2 className="mt-2 text-lg font-semibold text-ink">No plan yet</h2>
-          <p className="text-xs text-muted">Create your learning origin to get started.</p>
+          <p className="text-xs text-muted">Create your learning path to get started.</p>
         </div>
       </aside>
     )
@@ -74,7 +75,7 @@ export default function LessonSidebar({ compact = false }: { compact?: boolean }
               {unit.lessons.map((lesson) => {
                 const isActive = lesson.id === activeLessonId
                 return (
-                  <Link
+                  <TransitionLink
                     key={lesson.id}
                     to={`/lessons/${lesson.id}`}
                     className={`flex items-center justify-between rounded-xl border px-3 py-2 text-sm transition ${
@@ -87,7 +88,7 @@ export default function LessonSidebar({ compact = false }: { compact?: boolean }
                     <Badge variant={isActive ? "accent" : "neutral"}>
                       {lessonTypeLabel[lesson.type]}
                     </Badge>
-                  </Link>
+                  </TransitionLink>
                 )
               })}
             </div>
