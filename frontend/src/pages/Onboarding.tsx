@@ -20,7 +20,15 @@ type KnowledgeNode = {
   source_papers?: number[]
 }
 
-type Scene = "topic" | "background" | "notes" | "zotero" | "coursework"
+type Scene = "topic" | "background" | "notes" | "zotero" | "coursework" | "prerequisites"
+
+type PrerequisiteItem = {
+  name: string
+  description: string
+  confidence: number
+  order_index: number
+  is_foundational: boolean
+}
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
 
@@ -286,6 +294,12 @@ export default function OnboardingPage() {
   const [currentCourseworkUrl, setCurrentCourseworkUrl] = useState("")
   const [transcriptFile, setTranscriptFile] = useState<File | null>(null)
   const transcriptFileRef = useRef<HTMLInputElement>(null)
+
+  // Prerequisites confirmation state
+  const [allPrerequisites, setAllPrerequisites] = useState<PrerequisiteItem[]>([])
+  const [needsConfirmation, setNeedsConfirmation] = useState<PrerequisiteItem[]>([])
+  const [confirmedPrereqs, setConfirmedPrereqs] = useState<Set<string>>(new Set())
+  const [rejectedPrereqs, setRejectedPrereqs] = useState<Set<string>>(new Set())
 
   // Initialize user on mount - restore state if returning from OAuth
   const [userReady, setUserReady] = useState(false)
@@ -700,14 +714,41 @@ export default function OnboardingPage() {
     setCourseworkUrls(prev => prev.filter((_, i) => i !== index))
   }
 
-  const handleCourseworkSubmit = async () => {
-    if (courseworkUrls.length === 0 && !transcriptFile) {
-      // No coursework added, complete onboarding
-      clearOnboardingState()
-      navigate("/lessons")
-      return
-    }
+  // Generate learning path based on papers read
+  const generateLearningPath = async () => {
+    if (!sessionId || !userId) return
 
+    try {
+      console.log("[Onboarding] Generating learning path...")
+      const res = await fetch(`${API_BASE}/api/learning-path/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          user_id: userId
+        })
+      })
+      const data = await res.json()
+
+      if (data.success) {
+        console.log("[Onboarding] Learning path generated:", {
+          domain: data.domain,
+          subdomain: data.subdomain,
+          knownConcepts: data.known_concepts?.length || 0,
+          gaps: data.knowledge_gaps?.length || 0,
+          totalHours: data.total_estimated_hours
+        })
+        // Store learning path data in localStorage for the lessons page
+        localStorage.setItem("learningPath", JSON.stringify(data))
+      } else {
+        console.error("[Onboarding] Learning path generation failed:", data.error)
+      }
+    } catch (e) {
+      console.error("[Onboarding] Learning path generation error:", e)
+    }
+  }
+
+  const handleCourseworkSubmit = async () => {
     setIsLoading(true)
     setError(null)
 
@@ -754,8 +795,8 @@ export default function OnboardingPage() {
         setNodes(prev => [...prev, ...allNewNodes])
       }
 
-      clearOnboardingState()
-      navigate("/lessons")
+      // Generate prerequisites instead of old learning path
+      await generatePrerequisites()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to process coursework. Please try again.")
     } finally {
@@ -763,15 +804,109 @@ export default function OnboardingPage() {
     }
   }
 
-  const handleSkipCoursework = () => {
-    clearOnboardingState()
-    navigate("/lessons")
+  const handleSkipCoursework = async () => {
+    setIsLoading(true)
+    // Generate prerequisites even when skipping coursework
+    await generatePrerequisites()
+    setIsLoading(false)
+  }
+
+  // Generate true prerequisites for the topic
+  const generatePrerequisites = async () => {
+    if (!sessionId || !userId) return
+
+    try {
+      console.log("[Onboarding] Generating true prerequisites...")
+      const res = await fetch(`${API_BASE}/api/prerequisites/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          user_id: userId
+        })
+      })
+      const data = await res.json()
+
+      if (data.success) {
+        setAllPrerequisites(data.prerequisites || [])
+        setNeedsConfirmation(data.needs_confirmation || [])
+        
+        // Pre-confirm high-confidence items
+        const autoConfirmed = new Set(
+          data.prerequisites
+            .filter((p: PrerequisiteItem) => p.confidence > 0.7)
+            .map((p: PrerequisiteItem) => p.name)
+        )
+        setConfirmedPrereqs(autoConfirmed)
+        
+        localStorage.setItem("onboarding_scene", "prerequisites")
+        transitionToScene("prerequisites")
+      } else {
+        setError(data.error || "Failed to generate prerequisites")
+      }
+    } catch (e) {
+      console.error("[Onboarding] Prerequisites generation error:", e)
+      setError("Failed to generate prerequisites. Please try again.")
+    }
+  }
+
+  // Toggle prerequisite confirmation
+  const togglePrereqConfirmation = (name: string) => {
+    setConfirmedPrereqs(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) {
+        next.delete(name)
+        setRejectedPrereqs(r => new Set(r).add(name))
+      } else {
+        next.add(name)
+        setRejectedPrereqs(r => {
+          const nr = new Set(r)
+          nr.delete(name)
+          return nr
+        })
+      }
+      return next
+    })
+  }
+
+  // Submit confirmed prerequisites and start lessons
+  const handlePrerequisitesSubmit = async () => {
+    if (!sessionId || !userId) return
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const res = await fetch(`${API_BASE}/api/prerequisites/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          user_id: userId,
+          confirmed_prerequisites: Array.from(confirmedPrereqs),
+          rejected_prerequisites: Array.from(rejectedPrereqs)
+        })
+      })
+      const data = await res.json()
+
+      if (data.success) {
+        console.log(`[Onboarding] Confirmed ${data.total_topics} topics`)
+        clearOnboardingState()
+        navigate("/lessons")
+      } else {
+        setError(data.error || "Failed to confirm prerequisites")
+      }
+    } catch (e) {
+      setError("Failed to save prerequisites. Please try again.")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const clearOnboardingState = () => {
     localStorage.removeItem("onboarding_scene")
-    localStorage.removeItem("onboarding_topic")
-    localStorage.removeItem("onboarding_userId")
+    // NOTE: Keep onboarding_topic - it's displayed in LessonOverview and sidebar
+    // NOTE: Keep onboarding_userId - it's needed by LessonDetailView to fetch activities
     localStorage.removeItem("onboarding_nodes")
   }
 
@@ -1684,12 +1819,120 @@ export default function OnboardingPage() {
                       disabled={isLoading}
                       className="flex-1 bg-gray-800 hover:bg-gray-700"
                     >
-                      {isLoading ? "Finishing..." : "Complete Setup"}
+                      {isLoading ? "Analyzing..." : "Continue"}
                     </Button>
                   </div>
 
                   {error && <p className="text-sm text-red-500 mt-4">{error}</p>}
                 </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Scene 6: Prerequisites Confirmation */}
+          {scene === "prerequisites" && (
+            <motion.div
+              key="prerequisites"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.4 }}
+              className="w-full max-w-lg"
+            >
+              <div
+                className="p-8 rounded-2xl bg-white/95 backdrop-blur-sm border border-gray-100"
+                style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.06)' }}
+              >
+                <h2 className="font-serif text-2xl text-gray-800 mb-2">
+                  Your Learning Path
+                </h2>
+                <p className="text-gray-500 text-sm mb-6">
+                  We've identified these prerequisites for <span className="font-medium text-gray-700">{centralTopic}</span>. 
+                  Review and confirm the topics you want to learn.
+                </p>
+
+                <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
+                  {allPrerequisites.map((prereq, i) => {
+                    const isConfirmed = confirmedPrereqs.has(prereq.name)
+                    const needsUserConfirm = needsConfirmation.some(p => p.name === prereq.name)
+                    
+                    return (
+                      <div
+                        key={`prereq-${i}`}
+                        onClick={() => togglePrereqConfirmation(prereq.name)}
+                        className={`
+                          p-4 rounded-xl border cursor-pointer transition-all
+                          ${isConfirmed
+                            ? 'bg-green-50 border-green-300'
+                            : 'bg-gray-50 border-gray-200 opacity-60'
+                          }
+                          ${needsUserConfirm ? 'ring-2 ring-amber-300 ring-offset-1' : ''}
+                        `}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className={`
+                            w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5
+                            ${isConfirmed ? 'bg-green-500 border-green-500' : 'border-gray-300'}
+                          `}>
+                            {isConfirmed && (
+                              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-gray-800">{prereq.name}</span>
+                              {prereq.is_foundational && (
+                                <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-full">
+                                  Foundation
+                                </span>
+                              )}
+                              {needsUserConfirm && (
+                                <span className="px-2 py-0.5 text-xs bg-amber-100 text-amber-700 rounded-full">
+                                  Confirm?
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm text-gray-500 mt-1">{prereq.description}</p>
+                            <div className="flex items-center gap-2 mt-2">
+                              <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-green-400 rounded-full"
+                                  style={{ width: `${prereq.confidence * 100}%` }}
+                                />
+                              </div>
+                              <span className="text-xs text-gray-400">
+                                {Math.round(prereq.confidence * 100)}% match
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {allPrerequisites.length === 0 && (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>Generating your personalized learning path...</p>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-100">
+                  <span className="text-sm text-gray-500">
+                    {confirmedPrereqs.size} of {allPrerequisites.length} topics selected
+                  </span>
+                  <Button
+                    onClick={handlePrerequisitesSubmit}
+                    disabled={isLoading || confirmedPrereqs.size === 0}
+                    className="bg-gray-800 hover:bg-gray-700"
+                  >
+                    {isLoading ? "Starting..." : "Start Learning"}
+                  </Button>
+                </div>
+
+                {error && <p className="text-sm text-red-500 mt-4">{error}</p>}
               </div>
             </motion.div>
           )}

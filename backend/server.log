@@ -1,0 +1,347 @@
+INFO:     Will watch for changes in these directories: ['/Users/hudsonmitchell-pullman/rev-education-nexhacks/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [25560] using WatchFiles
+INFO:     Started server process [25584]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+[Main] Document processing worker started
+[DocumentWorker] Starting with 30s poll interval
+INFO:     127.0.0.1:55132 - "POST /api/prerequisites/generate HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'services/learning_path_pipeline.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [25584]
+INFO:     Started server process [28664]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+[Main] Document processing worker started
+[DocumentWorker] Starting with 30s poll interval
+INFO:     127.0.0.1:55178 - "OPTIONS /api/prerequisites/confirm HTTP/1.1" 200 OK
+Traceback (most recent call last):
+  File "/Users/hudsonmitchell-pullman/rev-education-nexhacks/backend/main.py", line 2197, in confirm_prerequisites
+    }).execute()
+  File "/opt/anaconda3/lib/python3.10/site-packages/postgrest/_sync/request_builder.py", line 53, in execute
+    raise APIError(dict(json_obj))
+postgrest.exceptions.APIError: {'message': "Could not find the 'user_id' column of 'lesson_topics' in the schema cache", 'code': 'PGRST204', 'hint': None, 'details': None}
+INFO:     127.0.0.1:55178 - "POST /api/prerequisites/confirm HTTP/1.1" 200 OK
+Traceback (most recent call last):
+  File "/Users/hudsonmitchell-pullman/rev-education-nexhacks/backend/main.py", line 2197, in confirm_prerequisites
+    }).execute()
+  File "/opt/anaconda3/lib/python3.10/site-packages/postgrest/_sync/request_builder.py", line 53, in execute
+    raise APIError(dict(json_obj))
+postgrest.exceptions.APIError: {'message': "Could not find the 'user_id' column of 'lesson_topics' in the schema cache", 'code': 'PGRST204', 'hint': None, 'details': None}
+INFO:     127.0.0.1:55185 - "POST /api/prerequisites/confirm HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'services/learning_path_pipeline.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [28664]
+INFO:     Started server process [29701]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'services/learning_path_pipeline.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [29701]
+INFO:     Started server process [29924]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'services/learning_path_pipeline.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [29924]
+INFO:     Started server process [30225]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [30225]
+INFO:     Started server process [30476]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [30476]
+INFO:     Started server process [31950]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+[Main] Document processing worker started
+[DocumentWorker] Starting with 30s poll interval
+INFO:     127.0.0.1:55629 - "POST /api/prerequisites/confirm HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55629 - "GET /api/lesson/current-topic/d21624cf-d004-43ce-97ae-81c1c965eda8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55629 - "GET /api/lesson/current-topic/d21624cf-d004-43ce-97ae-81c1c965eda8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55649 - "OPTIONS /api/lesson/content HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for connections to close. (CTRL+C to force quit)
+INFO:     127.0.0.1:55649 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55629 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [31950]
+INFO:     Started server process [32997]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+[Main] Document processing worker started
+[DocumentWorker] Starting with 30s poll interval
+INFO:     127.0.0.1:55854 - "GET /api/lesson/current-topic/d21624cf-d004-43ce-97ae-81c1c965eda8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55892 - "GET /api/lesson/current-topic/d21624cf-d004-43ce-97ae-81c1c965eda8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55892 - "GET /api/lesson/current-topic/d21624cf-d004-43ce-97ae-81c1c965eda8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55854 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55856 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55942 - "GET /api/lesson/current-topic/d21624cf-d004-43ce-97ae-81c1c965eda8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55896 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55892 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55942 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55943 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56060 - "GET /api/lesson/current-topic/d21624cf-d004-43ce-97ae-81c1c965eda8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56062 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56060 - "POST /api/lesson/content HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'services/content_aggregator.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [32997]
+INFO:     Started server process [37112]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'services/content_aggregator.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [37112]
+INFO:     Started server process [37462]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [37462]
+INFO:     Started server process [38202]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+[Main] Document processing worker started
+[DocumentWorker] Starting with 30s poll interval
+INFO:     127.0.0.1:56465 - "GET /api/lesson/current-topic/d21624cf-d004-43ce-97ae-81c1c965eda8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56465 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56466 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56572 - "POST /api/lesson/skip-topic?session_id=d21624cf-d004-43ce-97ae-81c1c965eda8&user_id=198 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56572 - "GET /api/lesson/current-topic/d21624cf-d004-43ce-97ae-81c1c965eda8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56572 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56630 - "GET /api/lesson/current-topic/d21624cf-d004-43ce-97ae-81c1c965eda8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56634 - "GET /api/lesson/current-topic/d21624cf-d004-43ce-97ae-81c1c965eda8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56630 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56634 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56861 - "POST /api/user/new HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56863 - "POST /api/user/new HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56882 - "OPTIONS /api/session/create HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56882 - "POST /api/session/create HTTP/1.1" 200 OK
+Storage endpoint URL should have a trailing slash.
+INFO:     127.0.0.1:56920 - "POST /api/profile/cv HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56920 - "GET /api/google-drive/status/200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56920 - "GET /api/google-drive/status/200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57056 - "OPTIONS /api/google-drive/connect HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57056 - "POST /api/google-drive/connect HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57056 - "OPTIONS /api/google-drive/search-relevant-docs HTTP/1.1" 200 OK
+[GoogleDrive] Starting comprehensive search for topic: guessing passwords with machine learning
+[GoogleDrive] ANTHROPIC_API_KEY configured: False
+[GoogleDrive] Using fallback search terms: ['guessing passwords with machine learning', 'guessing', 'passwords', 'with']
+[GoogleDrive] Searching for: 'guessing passwords with machine learning'
+[GoogleDrive] Found 1 docs for 'guessing passwords with machine learning'
+[GoogleDrive] Searching for: 'guessing'
+[GoogleDrive] Found 9 docs for 'guessing'
+[GoogleDrive] Searching for: 'passwords'
+[GoogleDrive] Found 50 docs for 'passwords'
+[GoogleDrive] Searching for: 'with'
+[GoogleDrive] Found 50 docs for 'with'
+[GoogleDrive] Found 100 recent docs
+[GoogleDrive] Total unique documents found: 141
+[GoogleDrive] Using fallback: returning first 10 recent documents
+INFO:     127.0.0.1:57056 - "POST /api/google-drive/search-relevant-docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57056 - "OPTIONS /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57074 - "OPTIONS /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57075 - "OPTIONS /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57056 - "POST /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57074 - "POST /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57075 - "POST /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57393 - "GET /api/google-drive/status/200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57393 - "GET /api/google-drive/status/200 HTTP/1.1" 200 OK
+[GoogleDrive] Starting comprehensive search for topic: guessing passwords with machine learning
+[GoogleDrive] ANTHROPIC_API_KEY configured: False
+[GoogleDrive] Using fallback search terms: ['guessing passwords with machine learning', 'guessing', 'passwords', 'with']
+[GoogleDrive] Searching for: 'guessing passwords with machine learning'
+[GoogleDrive] Found 1 docs for 'guessing passwords with machine learning'
+[GoogleDrive] Searching for: 'guessing'
+[GoogleDrive] Found 9 docs for 'guessing'
+[GoogleDrive] Searching for: 'passwords'
+[GoogleDrive] Found 50 docs for 'passwords'
+[GoogleDrive] Searching for: 'with'
+[GoogleDrive] Found 50 docs for 'with'
+[GoogleDrive] Found 100 recent docs
+[GoogleDrive] Total unique documents found: 141
+[GoogleDrive] Using fallback: returning first 10 recent documents
+INFO:     127.0.0.1:57396 - "POST /api/google-drive/search-relevant-docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57421 - "POST /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57396 - "POST /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57420 - "POST /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57562 - "GET /api/google-drive/status/200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57566 - "GET /api/google-drive/status/200 HTTP/1.1" 200 OK
+[GoogleDrive] Starting comprehensive search for topic: guessing passwords with machine learning
+[GoogleDrive] ANTHROPIC_API_KEY configured: False
+[GoogleDrive] Using fallback search terms: ['guessing passwords with machine learning', 'guessing', 'passwords', 'with']
+[GoogleDrive] Searching for: 'guessing passwords with machine learning'
+[GoogleDrive] Found 1 docs for 'guessing passwords with machine learning'
+[GoogleDrive] Searching for: 'guessing'
+[GoogleDrive] Found 9 docs for 'guessing'
+[GoogleDrive] Searching for: 'passwords'
+[GoogleDrive] Found 50 docs for 'passwords'
+[GoogleDrive] Searching for: 'with'
+[GoogleDrive] Found 50 docs for 'with'
+[GoogleDrive] Found 100 recent docs
+[GoogleDrive] Total unique documents found: 141
+[GoogleDrive] Using fallback: returning first 10 recent documents
+INFO:     127.0.0.1:57562 - "POST /api/google-drive/search-relevant-docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57579 - "POST /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57578 - "POST /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57562 - "POST /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57666 - "OPTIONS /api/profile/google-docs HTTP/1.1" 200 OK
+[GoogleDocs] Failed to store doc metadata: {'message': "Could not find the 'compressed_storage_path' column of 'google_docs_materials' in the schema cache", 'code': 'PGRST204', 'hint': None, 'details': None}
+[GoogleDocs] Failed to store doc metadata: {'message': "Could not find the 'compressed_storage_path' column of 'google_docs_materials' in the schema cache", 'code': 'PGRST204', 'hint': None, 'details': None}
+[GoogleDocs] Failed to store doc metadata: {'message': "Could not find the 'compressed_storage_path' column of 'google_docs_materials' in the schema cache", 'code': 'PGRST204', 'hint': None, 'details': None}
+INFO:     127.0.0.1:57666 - "POST /api/profile/google-docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57666 - "GET /api/zotero/status/200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57666 - "GET /api/zotero/status/200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57699 - "OPTIONS /api/zotero/oauth/initiate HTTP/1.1" 200 OK
+[Zotero OAuth] Requesting token with callback: http://localhost:3000/zotero/callback
+[Zotero OAuth] Got request token: c747b38c8a...
+INFO:     127.0.0.1:57699 - "POST /api/zotero/oauth/initiate HTTP/1.1" 200 OK
+Traceback (most recent call last):
+  File "/Users/hudsonmitchell-pullman/rev-education-nexhacks/backend/main.py", line 1091, in zotero_oauth_callback
+    expires_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+ValueError: Invalid isoformat string: '2026-01-18T18:06:11.4272+00:00'
+[Zotero Callback] Received oauth_token=c747b38c8a..., oauth_verifier=143ed0dde8..., state=PiNvOlT0xQ...
+INFO:     127.0.0.1:57755 - "GET /api/zotero/oauth/callback?oauth_token=c747b38c8ab7dc281b59&oauth_verifier=143ed0dde8073a65c5d1&state=PiNvOlT0xQgCLvHikfU9S-pS-8DMSNRodJ2q-LhxnD0 HTTP/1.1" 500 Internal Server Error
+Traceback (most recent call last):
+  File "/Users/hudsonmitchell-pullman/rev-education-nexhacks/backend/main.py", line 1091, in zotero_oauth_callback
+    expires_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+ValueError: Invalid isoformat string: '2026-01-18T18:06:11.4272+00:00'
+[Zotero Callback] Received oauth_token=c747b38c8a..., oauth_verifier=143ed0dde8..., state=PiNvOlT0xQ...
+INFO:     127.0.0.1:57760 - "GET /api/zotero/oauth/callback?oauth_token=c747b38c8ab7dc281b59&oauth_verifier=143ed0dde8073a65c5d1&state=PiNvOlT0xQgCLvHikfU9S-pS-8DMSNRodJ2q-LhxnD0 HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:57766 - "GET /api/zotero/status/200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57941 - "OPTIONS /api/prerequisites/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57941 - "POST /api/prerequisites/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58060 - "OPTIONS /api/prerequisites/confirm HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58060 - "POST /api/prerequisites/confirm HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58060 - "GET /api/lesson/current-topic/47d90720-16e4-4066-bff7-8ec80cc73196 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58060 - "GET /api/lesson/current-topic/47d90720-16e4-4066-bff7-8ec80cc73196 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58074 - "OPTIONS /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58074 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58060 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58987 - "POST /api/user/new HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58988 - "POST /api/user/new HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59000 - "OPTIONS /api/session/create HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59000 - "POST /api/session/create HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59022 - "POST /api/profile/cv HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59022 - "GET /api/google-drive/status/202 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59038 - "GET /api/google-drive/status/202 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59055 - "OPTIONS /api/google-drive/connect HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59055 - "POST /api/google-drive/connect HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59055 - "OPTIONS /api/google-drive/search-relevant-docs HTTP/1.1" 200 OK
+[GoogleDrive] Starting comprehensive search for topic: how deep learnijg is used in password guessing
+[GoogleDrive] ANTHROPIC_API_KEY configured: False
+[GoogleDrive] Using fallback search terms: ['how deep learnijg is used in password guessing', 'how', 'deep', 'learnijg']
+[GoogleDrive] Searching for: 'how deep learnijg is used in password guessing'
+[GoogleDrive] Found 1 docs for 'how deep learnijg is used in password guessing'
+[GoogleDrive] Searching for: 'how'
+[GoogleDrive] Found 50 docs for 'how'
+[GoogleDrive] Searching for: 'deep'
+[GoogleDrive] Found 50 docs for 'deep'
+[GoogleDrive] Searching for: 'learnijg'
+[GoogleDrive] Found 0 docs for 'learnijg'
+[GoogleDrive] Found 100 recent docs
+[GoogleDrive] Total unique documents found: 163
+[GoogleDrive] Using fallback: returning first 10 recent documents
+INFO:     127.0.0.1:59055 - "POST /api/google-drive/search-relevant-docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59055 - "OPTIONS /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59066 - "OPTIONS /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59067 - "OPTIONS /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59055 - "POST /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59067 - "POST /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59066 - "POST /api/google-drive/fetch-doc-content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59109 - "OPTIONS /api/profile/google-docs HTTP/1.1" 200 OK
+[GoogleDocs] Failed to store doc metadata: {'message': "Could not find the 'compressed_storage_path' column of 'google_docs_materials' in the schema cache", 'code': 'PGRST204', 'hint': None, 'details': None}
+[GoogleDocs] Failed to store doc metadata: {'message': "Could not find the 'compressed_storage_path' column of 'google_docs_materials' in the schema cache", 'code': 'PGRST204', 'hint': None, 'details': None}
+[GoogleDocs] Failed to store doc metadata: {'message': "Could not find the 'compressed_storage_path' column of 'google_docs_materials' in the schema cache", 'code': 'PGRST204', 'hint': None, 'details': None}
+INFO:     127.0.0.1:59109 - "POST /api/profile/google-docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59109 - "GET /api/zotero/status/202 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59109 - "GET /api/zotero/status/202 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59119 - "OPTIONS /api/zotero/oauth/initiate HTTP/1.1" 200 OK
+[Zotero OAuth] Requesting token with callback: http://localhost:3000/zotero/callback
+[Zotero OAuth] Got request token: ecb2eb466a...
+INFO:     127.0.0.1:59119 - "POST /api/zotero/oauth/initiate HTTP/1.1" 200 OK
+[Zotero Callback] Received oauth_token=ecb2eb466a..., oauth_verifier=61981444df..., state=Cfb9cxFLwR...
+[Zotero Callback] State valid. User ID: 202
+[Zotero Callback] oauth_token_secret from DB: 8404f4c19d...
+[Zotero Callback] oauth_verifier: 61981444dffb02561172
+[OAuth Debug] Param string: oauth_consumer_key=8a214d076ae70bbdcc0b&oauth_nonce=c7ab0068a560fb9e165a819ed8377894&oauth_signature...
+[OAuth Debug] Signature base: POST&https%3A%2F%2Fwww.zotero.org%2Foauth%2Faccess&oauth_consumer_key%3D8a214d076ae70bbdcc0b%26oauth_nonce%3Dc7ab0068a560fb9e165a819ed8377894%26oauth_...
+[OAuth Debug] Signing key (masked): 05caf3a95a...&8404f4c19d...
+[Zotero OAuth] Exchanging token. oauth_token=ecb2eb466a..., oauth_verifier=61981444dffb02561172...
+[Zotero OAuth] Auth header: OAuth oauth_consumer_key="8a214d076ae70bbdcc0b", oauth_nonce="c7ab0068a560fb9e165a819ed8377894", oau...
+INFO:     127.0.0.1:59119 - "GET /api/zotero/oauth/callback?oauth_token=ecb2eb466aef8c4085b8&oauth_verifier=61981444dffb02561172&state=Cfb9cxFLwRplr6xO2ufe7GQCroQhjMJEqGecUksRAHw HTTP/1.1" 200 OK
+Traceback (most recent call last):
+  File "/Users/hudsonmitchell-pullman/rev-education-nexhacks/backend/main.py", line 1077, in zotero_oauth_callback
+    state_result = supabase.table("zotero_oauth_states").select("*").eq("state_token", state).single().execute()
+  File "/opt/anaconda3/lib/python3.10/site-packages/postgrest/_sync/request_builder.py", line 82, in execute
+    raise APIError(dict(json_obj))
+postgrest.exceptions.APIError: {'message': 'Cannot coerce the result to a single JSON object', 'code': 'PGRST116', 'hint': None, 'details': 'The result contains 0 rows'}
+[Zotero Callback] Received oauth_token=ecb2eb466a..., oauth_verifier=61981444df..., state=Cfb9cxFLwR...
+INFO:     127.0.0.1:59119 - "GET /api/zotero/oauth/callback?oauth_token=ecb2eb466aef8c4085b8&oauth_verifier=61981444dffb02561172&state=Cfb9cxFLwRplr6xO2ufe7GQCroQhjMJEqGecUksRAHw HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:59119 - "GET /api/zotero/status/202 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59119 - "GET /api/zotero/items/202 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59490 - "GET /api/zotero/status/202 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59490 - "GET /api/zotero/status/202 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59492 - "GET /api/zotero/items/202 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59490 - "GET /api/zotero/items/202 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59545 - "OPTIONS /api/prerequisites/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59545 - "POST /api/prerequisites/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59565 - "OPTIONS /api/prerequisites/confirm HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59565 - "POST /api/prerequisites/confirm HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59565 - "GET /api/lesson/current-topic/4380f213-5c12-457c-aea8-24c879513b59 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59565 - "GET /api/lesson/current-topic/4380f213-5c12-457c-aea8-24c879513b59 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59577 - "OPTIONS /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59565 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59577 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59675 - "GET /api/lesson/current-topic/4380f213-5c12-457c-aea8-24c879513b59 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59675 - "GET /api/lesson/current-topic/4380f213-5c12-457c-aea8-24c879513b59 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59675 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59678 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59915 - "GET /api/lesson/current-topic/4380f213-5c12-457c-aea8-24c879513b59 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59915 - "GET /api/lesson/current-topic/4380f213-5c12-457c-aea8-24c879513b59 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59915 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59918 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60015 - "GET /api/lesson/current-topic/4380f213-5c12-457c-aea8-24c879513b59 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60015 - "GET /api/lesson/current-topic/4380f213-5c12-457c-aea8-24c879513b59 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60015 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60022 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60415 - "GET /api/lesson/current-topic/4380f213-5c12-457c-aea8-24c879513b59 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60415 - "GET /api/lesson/current-topic/4380f213-5c12-457c-aea8-24c879513b59 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60415 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60418 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60418 - "GET /api/lesson/current-topic/4380f213-5c12-457c-aea8-24c879513b59 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60418 - "POST /api/lesson/content HTTP/1.1" 200 OK
+[LessonContent] Problem scraping failed: Invalid \escape: line 23 column 98 (char 1899)
+INFO:     127.0.0.1:60415 - "POST /api/lesson/content HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [38202]
+INFO:     Stopping reloader process [25560]

@@ -1,5 +1,6 @@
-import LessonOverview from "@/components/LessonOverview"
+import LessonSplitView from "@/components/LessonSplitView"
 
 export default function LessonsPage() {
-  return <LessonOverview />
+  // Jump straight into the split-view lesson (no sidebar/overview)
+  return <LessonSplitView />
 }

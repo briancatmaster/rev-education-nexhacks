@@ -1505,6 +1505,36 @@ class PapersAuthoredResponse(BaseModel):
     error: Optional[str] = None
 
 
+# ============ Learning Path Models ============
+
+class LearningPathRequest(BaseModel):
+    session_id: str
+    user_id: int
+
+
+class ConceptNode(BaseModel):
+    name: str
+    description: str
+    is_prerequisite: bool = False
+    prerequisites: List[str] = []
+    difficulty_level: int = 1  # 1-5
+    estimated_hours: float = 1.0
+    is_known: bool = False  # True if user already knows this from papers
+    source_papers: List[str] = []  # Titles of papers that cover this
+
+
+class LearningPathResponse(BaseModel):
+    success: bool
+    domain: str = ""
+    subdomain: str = ""
+    concepts: List[ConceptNode] = []
+    knowledge_gaps: List[str] = []  # Concepts user hasn't learned
+    known_concepts: List[str] = []  # Concepts user already knows
+    learning_path_order: List[str] = []  # Ordered list of concepts to learn
+    total_estimated_hours: float = 0.0
+    error: Optional[str] = None
+
+
 @app.post("/api/profile/papers-authored", response_model=PapersAuthoredResponse)
 async def submit_papers_authored(
     files: List[UploadFile] = File(...),
@@ -2004,6 +2034,1227 @@ CONSTRAINTS:
     response_text = await call_gemini(prompt)
     result = extract_json_from_response(response_text)
     return result.get("nodes", [])
+
+
+# =============================================================================
+# PREREQUISITES GENERATION - True Prerequisites for Learning Path
+# =============================================================================
+
+class PrerequisiteItem(BaseModel):
+    name: str
+    description: str
+    confidence: float = 0.8
+    order_index: int = 0
+    is_foundational: bool = False
+
+
+class PrerequisitesGenerateRequest(BaseModel):
+    session_id: str
+    user_id: int
+
+
+class PrerequisitesGenerateResponse(BaseModel):
+    success: bool
+    prerequisites: List[PrerequisiteItem] = []
+    needs_confirmation: List[PrerequisiteItem] = []
+    error: Optional[str] = None
+
+
+class PrerequisitesConfirmRequest(BaseModel):
+    session_id: str
+    user_id: int
+    confirmed_prerequisites: List[str]
+    rejected_prerequisites: List[str] = []
+
+
+class PrerequisitesConfirmResponse(BaseModel):
+    success: bool
+    total_topics: int = 0
+    error: Optional[str] = None
+
+
+async def generate_prerequisites_for_topic(central_topic: str, user_background: List[str]) -> dict:
+    """Use Gemini to generate true prerequisites for learning a topic."""
+    background_formatted = "\n".join([f"- {b}" for b in user_background]) if user_background else "None provided"
+
+    prompt = f"""You are an expert educator creating a learning path for a student.
+
+STUDENT WANTS TO LEARN: "{central_topic}"
+
+STUDENT'S EXISTING KNOWLEDGE:
+{background_formatted}
+
+TASK:
+Identify the TRUE PREREQUISITES needed to understand "{central_topic}". These should be:
+1. Foundational concepts that MUST be understood first
+2. Ordered from most basic to most advanced
+3. Realistic - what would a textbook chapter sequence look like?
+
+For each prerequisite, assess:
+- confidence: How confident are you this is truly needed? (0.0-1.0)
+  - 0.9-1.0: Absolutely essential
+  - 0.7-0.9: Very important
+  - 0.5-0.7: Helpful but debatable (mark for user confirmation)
+  - Below 0.5: Don't include
+
+OUTPUT FORMAT (strict JSON, no markdown):
+{{
+  "prerequisites": [
+    {{
+      "name": "prerequisite topic (2-5 words)",
+      "description": "One sentence explaining what this covers and why it's needed",
+      "confidence": 0.0-1.0,
+      "order_index": 0,
+      "is_foundational": true/false
+    }}
+  ]
+}}
+
+CONSTRAINTS:
+- Return 8-15 prerequisites, ordered from foundational to advanced
+- is_foundational=true for the first 3-5 most basic concepts
+- Be specific: "Linear Algebra Basics" not just "Math"
+- Consider what someone would need to read in a textbook BEFORE the target topic
+- Skip anything the student already knows based on their background"""
+
+    response_text = await call_gemini(prompt)
+    result = extract_json_from_response(response_text)
+    return result
+
+
+@app.post("/api/prerequisites/generate", response_model=PrerequisitesGenerateResponse)
+async def generate_prerequisites(request: PrerequisitesGenerateRequest):
+    """Generate true prerequisites for the user's learning topic."""
+    try:
+        # Get session for central topic
+        session = supabase.table("learning_sessions").select("central_topic").eq("id", request.session_id).single().execute()
+        if not session.data:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        central_topic = session.data["central_topic"]
+
+        # Get user's existing knowledge from knowledge_nodes
+        knowledge_result = supabase.table("knowledge_nodes").select("label").eq("session_id", request.session_id).execute()
+        user_background = [n["label"] for n in knowledge_result.data if n.get("label")]
+
+        # Generate prerequisites via Gemini
+        result = await generate_prerequisites_for_topic(central_topic, user_background)
+        prerequisites_data = result.get("prerequisites", [])
+
+        prerequisites = []
+        needs_confirmation = []
+
+        for i, p in enumerate(prerequisites_data):
+            prereq = PrerequisiteItem(
+                name=p.get("name", ""),
+                description=p.get("description", ""),
+                confidence=p.get("confidence", 0.8),
+                order_index=i,
+                is_foundational=p.get("is_foundational", False)
+            )
+            prerequisites.append(prereq)
+
+            # Flag low-confidence items for user confirmation
+            if 0.5 <= prereq.confidence < 0.7:
+                needs_confirmation.append(prereq)
+
+        return PrerequisitesGenerateResponse(
+            success=True,
+            prerequisites=prerequisites,
+            needs_confirmation=needs_confirmation
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return PrerequisitesGenerateResponse(success=False, error=str(e))
+
+
+@app.post("/api/prerequisites/confirm", response_model=PrerequisitesConfirmResponse)
+async def confirm_prerequisites(request: PrerequisitesConfirmRequest):
+    """Confirm prerequisites and create lesson topics."""
+    try:
+        # Get session
+        session = supabase.table("learning_sessions").select("central_topic").eq("id", request.session_id).single().execute()
+        if not session.data:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Store confirmed prerequisites as lesson_topics
+        for i, prereq_name in enumerate(request.confirmed_prerequisites):
+            # Check if topic already exists
+            existing = supabase.table("lesson_topics").select("id").eq("session_id", request.session_id).eq("topic_name", prereq_name).execute()
+
+            if not existing.data:
+                supabase.table("lesson_topics").insert({
+                    "session_id": request.session_id,
+                    "topic_name": prereq_name,
+                    "order_index": i,
+                    "is_confirmed": True,
+                    "mastery_level": 0.0
+                }).execute()
+
+        return PrerequisitesConfirmResponse(
+            success=True,
+            total_topics=len(request.confirmed_prerequisites)
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return PrerequisitesConfirmResponse(success=False, error=str(e))
+
+
+# =============================================================================
+# LEARNING PATH GENERATION - Gap Analysis & Concept Decomposition
+# =============================================================================
+
+async def generate_learning_path_analysis(
+    central_topic: str,
+    paper_titles: List[str],
+    existing_knowledge: List[str]
+) -> dict:
+    """
+    Use Gemini to:
+    1. Identify the research domain based on paper titles
+    2. Decompose the topic into sub-concepts with prerequisites
+    3. Determine which concepts user knows (from papers) vs gaps
+    """
+    papers_formatted = "\n".join([f"- {t}" for t in paper_titles]) if paper_titles else "None"
+    knowledge_formatted = "\n".join([f"- {k}" for k in existing_knowledge]) if existing_knowledge else "None"
+
+    prompt = f"""You are an expert academic advisor analyzing a researcher's knowledge to create a personalized learning path.
+
+INPUT:
+- Research question/topic: "{central_topic}"
+- Papers the user has read:
+{papers_formatted}
+- Existing knowledge nodes from their background:
+{knowledge_formatted}
+
+TASK:
+1. DOMAIN IDENTIFICATION: Based on the papers read and topic, identify the primary research domain and subdomain.
+   - Consider overlaps: e.g., "CS Education" if they read both CS and Education papers
+   - Be specific: not just "Computer Science" but "Machine Learning" or "Natural Language Processing"
+
+2. CONCEPT DECOMPOSITION: Break down the research topic into 15-25 specific sub-concepts that someone would need to learn to deeply understand it.
+   - Include foundational prerequisites (mark as is_prerequisite: true)
+   - Include advanced concepts specific to the topic
+   - Order them from foundational to advanced
+
+3. KNOWLEDGE GAP ANALYSIS: For each concept, determine if the user's papers likely cover it.
+   - Mark is_known: true if their paper titles suggest they've learned this
+   - Mark is_known: false if this is a gap in their knowledge
+
+OUTPUT FORMAT (strict JSON, no markdown):
+{{
+  "domain": "primary research domain",
+  "subdomain": "specific subdomain or intersection",
+  "concepts": [
+    {{
+      "name": "concept name (2-4 words)",
+      "description": "1-2 sentence explanation of what this concept covers",
+      "is_prerequisite": true/false,
+      "prerequisites": ["list", "of", "concept", "names", "that must be learned first"],
+      "difficulty_level": 1-5,
+      "estimated_hours": number of hours to learn,
+      "is_known": true/false,
+      "source_papers": ["titles of papers that cover this concept"]
+    }}
+  ],
+  "learning_path_order": ["ordered", "list", "of", "concept", "names", "to", "learn"]
+}}
+
+CONSTRAINTS:
+- Return 15-25 concepts total
+- Prerequisites should be listed first in the learning_path_order
+- difficulty_level: 1=foundational, 2=intermediate, 3=advanced, 4=expert, 5=cutting-edge
+- estimated_hours should be realistic (1-20 hours per concept)
+- source_papers must only include exact titles from the user's paper list
+- is_known should be true ONLY if the user's papers clearly cover this concept
+- Concepts with is_known=true should NOT be in learning_path_order (they already know it)"""
+
+    response_text = await call_gemini(prompt)
+    result = extract_json_from_response(response_text)
+    return result
+
+
+@app.post("/api/learning-path/generate", response_model=LearningPathResponse)
+async def generate_learning_path(request: LearningPathRequest):
+    """
+    Generate a personalized learning path based on user's reading history.
+
+    This endpoint:
+    1. Fetches all papers the user has read
+    2. Uses Gemini to identify their research domain
+    3. Decomposes the topic into sub-concepts and prerequisites
+    4. Identifies knowledge gaps (concepts not covered by papers)
+    5. Stores results in Supabase for monitoring
+    """
+    try:
+        # Get session to retrieve central_topic
+        session = supabase.table("learning_sessions").select("*").eq("id", request.session_id).single().execute()
+        if not session.data:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        central_topic = session.data["central_topic"]
+
+        # Fetch all papers the user has read for this session
+        papers_result = supabase.table("academia_materials").select("title, material_type").eq("session_id", request.session_id).eq("user_id", request.user_id).execute()
+
+        paper_titles = [
+            p["title"] for p in papers_result.data
+            if p.get("title") and p.get("material_type") == "paper_read"
+        ]
+
+        # Get existing knowledge nodes from background
+        knowledge_result = supabase.table("knowledge_nodes").select("label, domain, type").eq("session_id", request.session_id).execute()
+
+        existing_knowledge = [n["label"] for n in knowledge_result.data if n.get("label")]
+
+        # Generate learning path using Gemini
+        analysis = await generate_learning_path_analysis(
+            central_topic=central_topic,
+            paper_titles=paper_titles,
+            existing_knowledge=existing_knowledge
+        )
+
+        # Extract results
+        domain = analysis.get("domain", "")
+        subdomain = analysis.get("subdomain", "")
+        concepts_data = analysis.get("concepts", [])
+        learning_path_order = analysis.get("learning_path_order", [])
+
+        # Separate known concepts from gaps
+        known_concepts = []
+        knowledge_gaps = []
+        concepts = []
+        total_hours = 0.0
+
+        for c in concepts_data:
+            concept = ConceptNode(
+                name=c.get("name", ""),
+                description=c.get("description", ""),
+                is_prerequisite=c.get("is_prerequisite", False),
+                prerequisites=c.get("prerequisites", []),
+                difficulty_level=c.get("difficulty_level", 1),
+                estimated_hours=c.get("estimated_hours", 1.0),
+                is_known=c.get("is_known", False),
+                source_papers=c.get("source_papers", [])
+            )
+            concepts.append(concept)
+
+            if concept.is_known:
+                known_concepts.append(concept.name)
+            else:
+                knowledge_gaps.append(concept.name)
+                total_hours += concept.estimated_hours
+
+        # Store in topic_concepts table
+        concepts_json = [c.model_dump() for c in concepts]
+
+        # Check if entry already exists
+        existing_tc = supabase.table("topic_concepts").select("id").eq("session_id", request.session_id).eq("user_id", request.user_id).execute()
+
+        if existing_tc.data:
+            # Update existing
+            supabase.table("topic_concepts").update({
+                "research_topic": central_topic,
+                "concepts": {
+                    "domain": domain,
+                    "subdomain": subdomain,
+                    "concepts": concepts_json,
+                    "learning_path_order": learning_path_order
+                },
+                "updated_at": datetime.utcnow().isoformat()
+            }).eq("id", existing_tc.data[0]["id"]).execute()
+            topic_concepts_id = existing_tc.data[0]["id"]
+        else:
+            # Create new
+            tc_result = supabase.table("topic_concepts").insert({
+                "session_id": request.session_id,
+                "user_id": request.user_id,
+                "research_topic": central_topic,
+                "concepts": {
+                    "domain": domain,
+                    "subdomain": subdomain,
+                    "concepts": concepts_json,
+                    "learning_path_order": learning_path_order
+                }
+            }).execute()
+            topic_concepts_id = tc_result.data[0]["id"]
+
+        # Store knowledge similarity/gap analysis
+        existing_uks = supabase.table("user_knowledge_similarity").select("id").eq("session_id", request.session_id).eq("user_id", request.user_id).execute()
+
+        knowledge_data = {
+            "known_concepts": [{"name": k, "source": "papers"} for k in known_concepts],
+            "knowledge_gaps": knowledge_gaps,
+            "total_known": len(known_concepts),
+            "total_gaps": len(knowledge_gaps),
+            "coverage_percentage": len(known_concepts) / max(len(concepts), 1) * 100
+        }
+
+        if existing_uks.data:
+            supabase.table("user_knowledge_similarity").update({
+                "topic_concepts_id": topic_concepts_id,
+                "known_concepts": knowledge_data,
+                "learning_path_suggestion": f"Focus on {len(knowledge_gaps)} concepts: {', '.join(learning_path_order[:5])}{'...' if len(learning_path_order) > 5 else ''}",
+                "updated_at": datetime.utcnow().isoformat()
+            }).eq("id", existing_uks.data[0]["id"]).execute()
+        else:
+            supabase.table("user_knowledge_similarity").insert({
+                "session_id": request.session_id,
+                "user_id": request.user_id,
+                "topic_concepts_id": topic_concepts_id,
+                "known_concepts": knowledge_data,
+                "learning_path_suggestion": f"Focus on {len(knowledge_gaps)} concepts: {', '.join(learning_path_order[:5])}{'...' if len(learning_path_order) > 5 else ''}"
+            }).execute()
+
+        return LearningPathResponse(
+            success=True,
+            domain=domain,
+            subdomain=subdomain,
+            concepts=concepts,
+            knowledge_gaps=knowledge_gaps,
+            known_concepts=known_concepts,
+            learning_path_order=learning_path_order,
+            total_estimated_hours=total_hours
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return LearningPathResponse(success=False, error=str(e))
+
+
+@app.get("/api/learning-path/{session_id}")
+async def get_learning_path(session_id: str):
+    """Get the stored learning path for a session."""
+    try:
+        # Get topic concepts
+        tc_result = supabase.table("topic_concepts").select("*").eq("session_id", session_id).single().execute()
+
+        if not tc_result.data:
+            raise HTTPException(status_code=404, detail="Learning path not found. Generate one first.")
+
+        # Get knowledge similarity
+        uks_result = supabase.table("user_knowledge_similarity").select("*").eq("session_id", session_id).single().execute()
+
+        return {
+            "topic_concepts": tc_result.data,
+            "knowledge_analysis": uks_result.data if uks_result.data else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ Prerequisites & Lesson Endpoints ============
+
+# Load OpenRouter API key for content aggregation
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+PREREQ_LOW_THRESHOLD = float(os.getenv("PREREQ_LOW_THRESHOLD", "0.3"))
+PREREQ_HIGH_THRESHOLD = float(os.getenv("PREREQ_HIGH_THRESHOLD", "0.7"))
+
+# Import content aggregator
+from services.content_aggregator import ContentAggregator, ContentType, SourceType
+
+
+class ActivityItem(BaseModel):
+    id: str
+    topic_id: str
+    topic_name: str
+    activity_type: str
+    title: str
+    embed_url: str
+    source_type: str
+    source_title: Optional[str] = None
+    duration_minutes: Optional[int] = None
+    order_index: int
+    is_problem: bool = False
+    problem_data: Optional[dict] = None
+
+
+class NextActivityResponse(BaseModel):
+    success: bool
+    activity: Optional[ActivityItem] = None
+    topic_progress: Optional[dict] = None
+    is_topic_complete: bool = False
+    is_course_complete: bool = False
+    error: Optional[str] = None
+
+
+class CompleteActivityRequest(BaseModel):
+    session_id: str
+    user_id: int
+    activity_id: str
+    user_response: Optional[str] = None  # For problem answers
+    feedback: Optional[str] = None  # "confused" or "too_easy"
+
+
+class CompleteActivityResponse(BaseModel):
+    success: bool
+    mastery_updated: bool = False
+    new_mastery_level: float = 0.0
+    topic_complete: bool = False
+    error: Optional[str] = None
+
+
+@app.get("/api/prerequisites/{session_id}")
+async def get_prerequisites(session_id: str):
+    """Get all prerequisites for a session."""
+    try:
+        result = supabase.table("lesson_topics").select("*").eq("session_id", session_id).order("order_index").execute()
+        return {"prerequisites": result.data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/lesson/next-activity", response_model=NextActivityResponse)
+async def get_next_activity(session_id: str, user_id: int):
+    """
+    Get the next activity for the user to complete.
+    Returns ONE activity at a time with embedded content.
+    """
+    try:
+        # Get current topic (first incomplete, confirmed topic)
+        topics_result = supabase.table("lesson_topics").select("*").eq("session_id", session_id).eq("is_confirmed", True).is_("completed_at", "null").order("order_index").limit(1).execute()
+        
+        if not topics_result.data:
+            # Check if course is complete
+            all_topics = supabase.table("lesson_topics").select("id").eq("session_id", session_id).eq("is_confirmed", True).execute()
+            completed_topics = supabase.table("lesson_topics").select("id").eq("session_id", session_id).eq("is_confirmed", True).not_.is_("completed_at", "null").execute()
+            
+            if len(all_topics.data) > 0 and len(all_topics.data) == len(completed_topics.data):
+                return NextActivityResponse(success=True, is_course_complete=True)
+            
+            return NextActivityResponse(success=False, error="No topics found. Generate prerequisites first.")
+        
+        current_topic = topics_result.data[0]
+        topic_id = current_topic["id"]
+        topic_name = current_topic["topic_name"]
+        
+        # Check for existing incomplete activity
+        existing_activity = supabase.table("lesson_activities").select("*").eq("topic_id", topic_id).eq("completed", False).order("order_index").limit(1).execute()
+        
+        if existing_activity.data:
+            activity = existing_activity.data[0]
+            
+            # Parse problem data if it's a problem type
+            problem_data = None
+            is_problem = activity["activity_type"] == "problem"
+            if is_problem and activity["embed_url"] and activity["embed_url"].startswith("data:application/json,"):
+                try:
+                    problem_data = json.loads(activity["embed_url"].replace("data:application/json,", ""))
+                except:
+                    pass
+            
+            return NextActivityResponse(
+                success=True,
+                activity=ActivityItem(
+                    id=activity["id"],
+                    topic_id=topic_id,
+                    topic_name=topic_name,
+                    activity_type=activity["activity_type"],
+                    title=activity["title"],
+                    embed_url=activity["embed_url"],
+                    source_type=activity["source_type"],
+                    source_title=activity.get("source_title"),
+                    duration_minutes=activity.get("duration_minutes"),
+                    order_index=activity["order_index"],
+                    is_problem=is_problem,
+                    problem_data=problem_data
+                ),
+                topic_progress={
+                    "topic_name": topic_name,
+                    "mastery_level": current_topic["mastery_level"],
+                    "order_index": current_topic["order_index"]
+                }
+            )
+        
+        # No existing activity - need to generate new ones
+        # Count completed activities for this topic
+        completed_count = supabase.table("lesson_activities").select("id").eq("topic_id", topic_id).eq("completed", True).execute()
+        activity_count = len(completed_count.data)
+        
+        # Check if topic should be marked complete (mastery threshold)
+        if current_topic["mastery_level"] >= 0.8 or activity_count >= 5:
+            # Mark topic as complete
+            supabase.table("lesson_topics").update({
+                "completed_at": datetime.utcnow().isoformat()
+            }).eq("id", topic_id).execute()
+            
+            return NextActivityResponse(
+                success=True,
+                is_topic_complete=True,
+                topic_progress={
+                    "topic_name": topic_name,
+                    "mastery_level": current_topic["mastery_level"],
+                    "order_index": current_topic["order_index"]
+                }
+            )
+        
+        # Generate new activity using content aggregator
+        if not OPENROUTER_API_KEY:
+            return NextActivityResponse(success=False, error="OPENROUTER_API_KEY not configured")
+        
+        aggregator = ContentAggregator(OPENROUTER_API_KEY, os.getenv("OPENALEX_API_KEY"))
+        
+        # Determine activity type based on count
+        if activity_count == 0:
+            # First activity: video
+            content_items = await aggregator.search_youtube(topic_name, max_results=1)
+        elif activity_count == 1:
+            # Second activity: reading
+            content_items = await aggregator.search_openalex(topic_name, max_results=1)
+        elif activity_count % 3 == 2:
+            # Every third activity: problem
+            problem = await aggregator.generate_problem(topic_name)
+            content_items = [problem] if problem else []
+        else:
+            # Mix of videos and readings
+            search_result = await aggregator.search_content_for_topic(topic_name, max_items=1)
+            content_items = search_result.items
+        
+        if not content_items:
+            # Fallback: try general search
+            search_result = await aggregator.search_content_for_topic(topic_name, max_items=1)
+            content_items = search_result.items
+        
+        if not content_items:
+            return NextActivityResponse(success=False, error=f"Could not find content for topic: {topic_name}")
+        
+        content = content_items[0]
+        
+        # Store the new activity
+        new_activity = supabase.table("lesson_activities").insert({
+            "topic_id": topic_id,
+            "activity_type": content.content_type.value,
+            "title": content.title,
+            "embed_url": content.embed_url,
+            "source_type": content.source_type.value,
+            "source_title": content.source_title,
+            "duration_minutes": content.duration_minutes,
+            "order_index": activity_count,
+            "completed": False
+        }).execute()
+        
+        activity = new_activity.data[0]
+        
+        # Parse problem data if it's a problem type
+        problem_data = None
+        is_problem = content.content_type == ContentType.PROBLEM
+        if is_problem and content.embed_url and content.embed_url.startswith("data:application/json,"):
+            try:
+                problem_data = json.loads(content.embed_url.replace("data:application/json,", ""))
+            except:
+                pass
+        
+        return NextActivityResponse(
+            success=True,
+            activity=ActivityItem(
+                id=activity["id"],
+                topic_id=topic_id,
+                topic_name=topic_name,
+                activity_type=content.content_type.value,
+                title=content.title,
+                embed_url=content.embed_url,
+                source_type=content.source_type.value,
+                source_title=content.source_title,
+                duration_minutes=content.duration_minutes,
+                order_index=activity_count,
+                is_problem=is_problem,
+                problem_data=problem_data
+            ),
+            topic_progress={
+                "topic_name": topic_name,
+                "mastery_level": current_topic["mastery_level"],
+                "order_index": current_topic["order_index"]
+            }
+        )
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return NextActivityResponse(success=False, error=str(e))
+
+
+@app.post("/api/lesson/complete-activity", response_model=CompleteActivityResponse)
+async def complete_activity(request: CompleteActivityRequest):
+    """
+    Mark an activity as complete and update mastery level.
+    """
+    try:
+        # Get the activity
+        activity_result = supabase.table("lesson_activities").select("*, lesson_topics(*)").eq("id", request.activity_id).single().execute()
+        
+        if not activity_result.data:
+            raise HTTPException(status_code=404, detail="Activity not found")
+        
+        activity = activity_result.data
+        topic_id = activity["topic_id"]
+        
+        # Mark activity as complete
+        supabase.table("lesson_activities").update({
+            "completed": True,
+            "completed_at": datetime.utcnow().isoformat(),
+            "user_response": request.user_response
+        }).eq("id", request.activity_id).execute()
+        
+        # Get topic and calculate new mastery
+        topic_result = supabase.table("lesson_topics").select("*").eq("id", topic_id).single().execute()
+        topic = topic_result.data
+        
+        # Count completed activities
+        completed = supabase.table("lesson_activities").select("id").eq("topic_id", topic_id).eq("completed", True).execute()
+        completed_count = len(completed.data)
+        
+        # Calculate mastery based on completed activities (simple formula)
+        # Each activity adds ~0.2 to mastery, capped at 1.0
+        base_mastery = completed_count * 0.2
+        
+        # Adjust based on feedback
+        if request.feedback == "confused":
+            # Reduce mastery gain when confused
+            base_mastery = max(0, base_mastery - 0.1)
+        elif request.feedback == "too_easy":
+            # Boost mastery when content is too easy
+            base_mastery = base_mastery + 0.15
+        
+        new_mastery = min(1.0, base_mastery)
+        
+        # Update topic mastery
+        supabase.table("lesson_topics").update({
+            "mastery_level": new_mastery
+        }).eq("id", topic_id).execute()
+        
+        # Check if topic is complete
+        topic_complete = new_mastery >= 0.8 or completed_count >= 5
+        
+        if topic_complete:
+            supabase.table("lesson_topics").update({
+                "completed_at": datetime.utcnow().isoformat()
+            }).eq("id", topic_id).execute()
+        
+        return CompleteActivityResponse(
+            success=True,
+            mastery_updated=True,
+            new_mastery_level=new_mastery,
+            topic_complete=topic_complete
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return CompleteActivityResponse(success=False, error=str(e))
+
+
+@app.post("/api/lesson/skip-topic")
+async def skip_topic(session_id: str, user_id: int):
+    """Skip the current topic and move to the next one."""
+    try:
+        # Get current topic
+        topics_result = supabase.table("lesson_topics").select("*").eq("session_id", session_id).eq("is_confirmed", True).is_("completed_at", "null").order("order_index").limit(1).execute()
+        
+        if not topics_result.data:
+            return {"success": False, "error": "No active topic to skip"}
+        
+        current_topic = topics_result.data[0]
+        
+        # Mark as complete (skipped)
+        supabase.table("lesson_topics").update({
+            "completed_at": datetime.utcnow().isoformat(),
+            "mastery_level": 0.0  # No mastery for skipped topics
+        }).eq("id", current_topic["id"]).execute()
+        
+        return {"success": True, "skipped_topic": current_topic["topic_name"]}
+    
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/lesson/progress/{session_id}")
+async def get_lesson_progress(session_id: str):
+    """Get overall lesson progress for a session."""
+    try:
+        # Get all topics
+        topics = supabase.table("lesson_topics").select("*").eq("session_id", session_id).eq("is_confirmed", True).order("order_index").execute()
+        
+        total = len(topics.data)
+        completed = sum(1 for t in topics.data if t.get("completed_at"))
+        avg_mastery = sum(t.get("mastery_level", 0) for t in topics.data) / max(total, 1)
+        
+        return {
+            "success": True,
+            "total_topics": total,
+            "completed_topics": completed,
+            "average_mastery": avg_mastery,
+            "progress_percentage": (completed / max(total, 1)) * 100,
+            "topics": topics.data
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# LESSON CONTENT AGGREGATION - Full lesson with problems from math sources
+# =============================================================================
+
+class LessonContentRequest(BaseModel):
+    session_id: str
+    user_id: int
+    topic_id: Optional[str] = None  # If None, use current topic
+
+
+class MathProblem(BaseModel):
+    problem: str
+    hints: List[str] = []
+    solution: str = ""
+    answer: str = ""
+    source: str = ""
+    source_url: str = ""
+    difficulty: str = "medium"
+    latex_content: bool = True
+
+
+class VideoEmbed(BaseModel):
+    video_id: str
+    title: str
+    source: str = "youtube"
+    embed_url: str
+
+
+class LessonContentResponse(BaseModel):
+    success: bool
+    topic_name: str = ""
+    lesson_content: str = ""  # Markdown formatted lesson text
+    video: Optional[VideoEmbed] = None  # Embedded video for the topic
+    problems: List[MathProblem] = []
+    error: Optional[str] = None
+    abstraction_level: int = 3  # 1-5, where 1 is simplest
+
+
+class SimplifyContentRequest(BaseModel):
+    session_id: str
+    topic_id: Optional[str] = None
+    target_abstraction_level: int = 2  # 1-5, where 1 is simplest
+    current_content: Optional[str] = None  # Optional: existing content to simplify
+
+
+class SimplifyContentResponse(BaseModel):
+    success: bool
+    topic_name: str = ""
+    simplified_content: str = ""
+    abstraction_level: int = 2
+    error: Optional[str] = None
+
+
+async def generate_simplified_lesson(
+    topic: str,
+    user_background: List[str],
+    abstraction_level: int = 2,
+    current_content: Optional[str] = None
+) -> str:
+    """
+    Generate lesson content at a specified abstraction level.
+
+    Levels:
+    1 = ELI5 (Explain Like I'm 5) - Very simple analogies, no jargon
+    2 = Beginner - Simple language, basic examples, minimal formulas
+    3 = Intermediate - Standard explanation with some formulas
+    4 = Advanced - Technical language, full mathematical treatment
+    5 = Expert - Research-level, assumes prior knowledge
+    """
+    background_str = ", ".join(user_background[:5]) if user_background else "general audience"
+
+    level_descriptions = {
+        1: """EXPLAIN LIKE I'M NEW TO THIS:
+- Use simple everyday analogies (like cooking, sports, etc.)
+- Avoid ALL technical jargon - use plain words only
+- No mathematical formulas at all
+- Short sentences, friendly tone
+- Focus on intuition and "why this matters"
+- Use concrete, visual examples""",
+
+        2: """BEGINNER LEVEL:
+- Simple language with minimal jargon
+- When introducing a term, immediately explain it
+- Only basic formulas (if needed), always explained step-by-step
+- Use relatable real-world examples
+- Build concepts gradually
+- Include helpful analogies""",
+
+        3: """INTERMEDIATE LEVEL (STANDARD):
+- Balance of conceptual and technical explanation
+- Include relevant formulas with explanations
+- Assume basic familiarity with the domain
+- Connect to prerequisite knowledge
+- Include worked examples""",
+
+        4: """ADVANCED LEVEL:
+- Technical language is appropriate
+- Full mathematical derivations when relevant
+- Assume solid foundation in prerequisites
+- Include edge cases and nuances
+- Reference related advanced concepts""",
+
+        5: """EXPERT/RESEARCH LEVEL:
+- Assume comprehensive background knowledge
+- Full mathematical rigor
+- Discuss cutting-edge variations
+- Include research context and open problems
+- Reference literature where appropriate"""
+    }
+
+    level_desc = level_descriptions.get(abstraction_level, level_descriptions[3])
+
+    context_prompt = ""
+    if current_content:
+        context_prompt = f"""
+
+The student was previously shown this content but found it confusing:
+---
+{current_content[:2000]}
+---
+
+Your task is to explain the SAME concepts but at a SIMPLER level.
+Focus on what might have confused them and make it clearer."""
+
+    prompt = f"""Create a lesson on: "{topic}"
+
+Target audience: Student with background in {background_str}
+ABSTRACTION LEVEL: {abstraction_level}/5
+
+{level_desc}
+{context_prompt}
+
+Write the lesson in proper Markdown format. This will be rendered in a web browser.
+
+FORMATTING RULES:
+- Use # for main title, ## for section headers, ### for subsections  
+- Use **text** for bold (important terms)
+- Use *text* for italic (emphasis)
+- Use - or * at the start of lines for bullet points (with space after)
+- Use 1. 2. 3. for numbered lists
+- {"Avoid complex formulas, use simple analogies instead" if abstraction_level <= 2 else "For math: use single $ for inline (e.g., $x^2$) and double $$ for display math"}
+- Do NOT escape asterisks or markdown characters
+- Do NOT wrap in code blocks
+
+CONTENT:
+1. A welcoming introduction connecting to what they might know
+2. Core concepts at the appropriate level
+3. {"Simple analogies and everyday examples" if abstraction_level <= 2 else "Mathematical formulas with explanations"}
+4. {"Step-by-step walkthroughs with lots of explanation" if abstraction_level <= 2 else "Examples with solutions"}
+5. Key takeaways in simple terms
+
+Match complexity to level {abstraction_level}. About {"400-600" if abstraction_level <= 2 else "600-900"} words.
+Output ONLY the Markdown lesson content."""
+
+    response = await call_gemini(prompt)
+    return response
+
+
+async def generate_lesson_text(topic: str, user_background: List[str]) -> str:
+    """Generate comprehensive lesson text using Gemini."""
+    background_str = ", ".join(user_background[:5]) if user_background else "general audience"
+
+    prompt = f"""Create a comprehensive lesson on: "{topic}"
+
+Target audience: Student with background in {background_str}
+
+CRITICAL: Output raw Markdown text directly. Do NOT wrap the output in ```markdown``` or any code fences.
+
+FORMATTING RULES:
+- Use # for main title, ## for section headers, ### for subsections
+- Use **text** for bold (important terms)
+- Use *text* for italic (emphasis)  
+- Use - or * for bullet points (with space after)
+- Use 1. 2. 3. for numbered lists
+- For math: use $x^2$ for inline math, and $$ on separate lines for display math
+- Do NOT escape markdown characters with backslashes
+- Do NOT wrap the entire output in triple backticks
+
+CONTENT STRUCTURE:
+1. Brief introduction (why this matters)
+2. Key concepts with headers and bullet points
+3. Mathematical formulas in LaTeX
+4. Examples with step-by-step solutions
+5. Summary of takeaways
+
+About 600-1000 words. Start directly with the content - no code fences."""
+
+    response = await call_gemini(prompt)
+    return response
+
+
+async def scrape_math_problems_from_sources(topic: str, num_problems: int = 5) -> List[dict]:
+    """
+    Use OpenRouter's browse model to find math problems from educational sources.
+    Sources: Paul's Math Notes, MIT OCW, AoPS, Khan Academy
+    """
+    if not OPENROUTER_API_KEY:
+        return []
+
+    prompt = f"""Find practice problems for the topic: "{topic}"
+
+Search these educational sources:
+1. Paul's Math Notes (tutorial.math.lamar.edu)
+2. MIT OpenCourseWare (ocw.mit.edu)
+3. Art of Problem Solving (artofproblemsolving.com)
+4. Khan Academy (khanacademy.org)
+
+For each problem found, extract:
+- The complete problem statement (include any LaTeX math notation)
+- Hints if available
+- The solution or answer
+- The source URL
+
+Return a JSON array with {num_problems} problems:
+[
+  {{
+    "problem": "Problem statement with $LaTeX$ math notation",
+    "hints": ["Hint 1", "Hint 2"],
+    "solution": "Step-by-step solution with $LaTeX$",
+    "answer": "Final answer",
+    "source": "Paul's Math Notes",
+    "source_url": "https://...",
+    "difficulty": "easy/medium/hard"
+  }}
+]
+
+IMPORTANT:
+- Preserve all mathematical notation in LaTeX format
+- Include complete problem statements
+- If you can't find actual problems, generate realistic ones in the style of these sources
+- Return ONLY the JSON array"""
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://arxlearn.app",
+                    "X-Title": "arXlearn"
+                },
+                json={
+                    "model": "openai/gpt-4o-mini:online",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                    "max_tokens": 3000,
+                    # Enable web search plugin for real results from educational sites
+                    "plugins": [
+                        {
+                            "id": "web",
+                            "max_results": 10,
+                            "search_prompt": f"Search for math practice problems about {topic} from tutorial.math.lamar.edu, ocw.mit.edu, artofproblemsolving.com, khanacademy.org:"
+                        }
+                    ]
+                },
+                timeout=60.0
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        content = data["choices"][0]["message"]["content"]
+
+        # Extract JSON from response
+        json_match = re.search(r'\[[\s\S]*\]', content)
+        if json_match:
+            problems = json.loads(json_match.group())
+            return problems
+    except Exception as e:
+        print(f"[LessonContent] Problem scraping failed: {e}")
+
+    return []
+
+
+@app.post("/api/lesson/content", response_model=LessonContentResponse)
+async def get_lesson_content(request: LessonContentRequest):
+    """
+    Get full lesson content with aggregated text, video, and math problems.
+    This endpoint generates lesson content asynchronously - call it to start
+    generation and it returns immediately with partial content if available.
+    """
+    try:
+        # Get current topic if not specified
+        if request.topic_id:
+            topic_result = supabase.table("lesson_topics").select("*").eq("id", request.topic_id).single().execute()
+        else:
+            topic_result = supabase.table("lesson_topics").select("*").eq("session_id", request.session_id).eq("is_confirmed", True).is_("completed_at", "null").order("order_index").limit(1).execute()
+            if topic_result.data:
+                topic_result.data = topic_result.data[0] if isinstance(topic_result.data, list) else topic_result.data
+
+        if not topic_result.data:
+            return LessonContentResponse(success=False, error="No active topic found")
+
+        topic_data = topic_result.data if isinstance(topic_result.data, dict) else topic_result.data[0]
+        topic_name = topic_data["topic_name"]
+
+        # Get user's background knowledge
+        knowledge_result = supabase.table("knowledge_nodes").select("label").eq("session_id", request.session_id).execute()
+        user_background = [n["label"] for n in knowledge_result.data if n.get("label")]
+
+        # Create content aggregator for video search
+        aggregator = ContentAggregator(OPENROUTER_API_KEY, os.getenv("OPENALEX_API_KEY")) if OPENROUTER_API_KEY else None
+
+        # Generate lesson text, fetch video, and scrape problems in parallel
+        import asyncio
+        lesson_task = asyncio.create_task(generate_lesson_text(topic_name, user_background))
+        problems_task = asyncio.create_task(scrape_math_problems_from_sources(topic_name, 5))
+        video_task = asyncio.create_task(aggregator.search_youtube(topic_name, max_results=1)) if aggregator else None
+
+        # Wait for all with timeout (don't block indefinitely)
+        try:
+            tasks = [lesson_task, problems_task]
+            if video_task:
+                tasks.append(video_task)
+            
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=45.0
+            )
+            
+            lesson_content = results[0] if not isinstance(results[0], Exception) else "Loading lesson content..."
+            raw_problems = results[1] if not isinstance(results[1], Exception) else []
+            video_results = results[2] if len(results) > 2 and not isinstance(results[2], Exception) else []
+        except asyncio.TimeoutError:
+            # Return partial content if we have it
+            lesson_content = "Loading lesson content..."
+            raw_problems = []
+            video_results = []
+
+        # Convert raw problems to MathProblem objects
+        problems = []
+        for p in raw_problems:
+            problems.append(MathProblem(
+                problem=p.get("problem", ""),
+                hints=p.get("hints", []),
+                solution=p.get("solution", ""),
+                answer=p.get("answer", ""),
+                source=p.get("source", "Generated"),
+                source_url=p.get("source_url", ""),
+                difficulty=p.get("difficulty", "medium"),
+                latex_content=True
+            ))
+
+        # Extract video embed info
+        video_embed = None
+        if video_results and len(video_results) > 0:
+            video = video_results[0]
+            # Extract video ID from embed URL
+            video_id = ""
+            if video.embed_url and "youtube" in video.embed_url:
+                # Extract ID from URL like https://www.youtube-nocookie.com/embed/VIDEO_ID
+                parts = video.embed_url.split("/")
+                video_id = parts[-1] if parts else ""
+            
+            if video_id:
+                video_embed = VideoEmbed(
+                    video_id=video_id,
+                    title=video.title,
+                    source="youtube",
+                    embed_url=video.embed_url
+                )
+
+        return LessonContentResponse(
+            success=True,
+            topic_name=topic_name,
+            lesson_content=lesson_content,
+            video=video_embed,
+            problems=problems
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return LessonContentResponse(success=False, error=str(e))
+
+
+@app.post("/api/lesson/simplify-content", response_model=SimplifyContentResponse)
+async def simplify_lesson_content(request: SimplifyContentRequest):
+    """
+    Regenerate lesson content at a lower abstraction level.
+    Called when user is confused and clicks "Simplify" button.
+
+    Abstraction levels:
+    1 = ELI5 (Explain Like I'm 5) - Very simple analogies, no jargon
+    2 = Beginner - Simple language, basic examples, minimal formulas
+    3 = Intermediate - Standard explanation with some formulas
+    4 = Advanced - Technical language, full mathematical treatment
+    5 = Expert - Research-level, assumes prior knowledge
+    """
+    try:
+        # Validate abstraction level
+        target_level = max(1, min(5, request.target_abstraction_level))
+
+        # Get topic info
+        if request.topic_id:
+            topic_result = supabase.table("lesson_topics").select("*").eq("id", request.topic_id).single().execute()
+        else:
+            topic_result = supabase.table("lesson_topics").select("*").eq("session_id", request.session_id).eq("is_confirmed", True).is_("completed_at", "null").order("order_index").limit(1).execute()
+            if topic_result.data:
+                topic_result.data = topic_result.data[0] if isinstance(topic_result.data, list) else topic_result.data
+
+        if not topic_result.data:
+            return SimplifyContentResponse(success=False, error="No active topic found")
+
+        topic_data = topic_result.data if isinstance(topic_result.data, dict) else topic_result.data[0]
+        topic_name = topic_data["topic_name"]
+
+        # Get user's background knowledge
+        knowledge_result = supabase.table("knowledge_nodes").select("label").eq("session_id", request.session_id).execute()
+        user_background = [n["label"] for n in knowledge_result.data if n.get("label")]
+
+        # Generate simplified content
+        simplified_content = await generate_simplified_lesson(
+            topic=topic_name,
+            user_background=user_background,
+            abstraction_level=target_level,
+            current_content=request.current_content
+        )
+
+        return SimplifyContentResponse(
+            success=True,
+            topic_name=topic_name,
+            simplified_content=simplified_content,
+            abstraction_level=target_level
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return SimplifyContentResponse(success=False, error=str(e))
+
+
+@app.get("/api/lesson/current-topic/{session_id}")
+async def get_current_topic(session_id: str):
+    """Get the current active topic for a session."""
+    try:
+        topic_result = supabase.table("lesson_topics").select("*").eq("session_id", session_id).eq("is_confirmed", True).is_("completed_at", "null").order("order_index").limit(1).execute()
+
+        if not topic_result.data:
+            # Check if all topics are complete
+            all_topics = supabase.table("lesson_topics").select("*").eq("session_id", session_id).eq("is_confirmed", True).execute()
+            if all_topics.data and all(t.get("completed_at") for t in all_topics.data):
+                return {"success": True, "course_complete": True, "topic": None}
+            return {"success": False, "error": "No active topic"}
+
+        return {"success": True, "course_complete": False, "topic": topic_result.data[0]}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

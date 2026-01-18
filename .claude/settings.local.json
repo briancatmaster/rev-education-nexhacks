@@ -39,7 +39,12 @@
       "Bash(source .venv/bin/activate)",
       "Bash(uvicorn:*)",
       "Bash(python -c:*)",
-      "Bash(python workers/document_worker.py:*)"
+      "Bash(python workers/document_worker.py:*)",
+      "Bash(npm install:*)",
+      "Bash(lsof:*)",
+      "Bash(ss:*)",
+      "Bash(pkill:*)",
+      "Bash(npx tsc:*)"
     ]
   },
   "model": "claude-opus-4-5-20251101",
