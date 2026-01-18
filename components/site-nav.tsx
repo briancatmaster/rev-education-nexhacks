@@ -10,8 +10,8 @@ const navLinks = [
 
 export default function SiteNav() {
   return (
-    <header className="sticky top-0 z-30 border-b border-peach/60 bg-paper/80 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-[8vw] py-4">
+    <header className="sticky top-0 z-50 border-b border-peach/60 bg-paper/70 backdrop-blur-md backdrop-saturate-150">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-[8vw] py-4">
         <div className="flex items-center gap-4">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-ink/10 bg-white shadow-float">
             <span className="text-xl font-black text-ink">a</span>

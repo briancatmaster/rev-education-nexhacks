@@ -23,13 +23,9 @@ export default function Home() {
         </div>
         <section className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-6">
-            <div className="flex items-center gap-4">
-              <p className="text-xs font-semibold text-cobalt">
-                arXlearn
-              </p>
-              <span className="h-px flex-1 bg-peach/80" />
-            </div>
-            <p className="text-lg font-medium text-ink/80">PhD level learning in half the time</p>
+            <h2 className="text-2xl font-semibold text-ink">
+              arXlearn — PhD level learning in half the time
+            </h2>
             <h1 className="font-serif text-4xl leading-tight sm:text-6xl">
               Curate the world's best research into a lesson built for your mind.
             </h1>
