@@ -1,1 +1,1 @@
-self.__NEXT_FONT_MANIFEST="{\"pages\":{},\"app\":{\"/home/briancatmaster/rev-learn-nexhacks/rev-learn-app/app/layout\":[\"static/media/5611c55482296524.p.woff2\",\"static/media/cf1398c533b7af5b-s.p.woff2\"]},\"appUsingSizeAdjust\":true,\"pagesUsingSizeAdjust\":false}"
+self.__NEXT_FONT_MANIFEST="{\"pages\":{},\"app\":{\"/home/briancatmaster/rev-learn-nexhacks/rev-learn-app/app/layout\":[\"static/media/982ceffe7b733b3b-s.p.woff2\",\"static/media/26d4368bf94c0ec4-s.p.woff2\"]},\"appUsingSizeAdjust\":true,\"pagesUsingSizeAdjust\":false}"

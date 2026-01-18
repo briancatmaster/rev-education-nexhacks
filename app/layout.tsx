@@ -1,15 +1,17 @@
 import "./globals.css"
 import type { Metadata } from "next"
-import { Newsreader, Spline_Sans } from "next/font/google"
+import { Archivo_Black, IBM_Plex_Sans } from "next/font/google"
 
-const newsreader = Newsreader({
+const archivoBlack = Archivo_Black({
   subsets: ["latin"],
   variable: "--font-newsreader",
+  weight: "400",
 })
 
-const splineSans = Spline_Sans({
+const ibmPlexSans = IBM_Plex_Sans({
   subsets: ["latin"],
   variable: "--font-spline",
+  weight: ["300", "400", "500", "600"],
 })
 
 export const metadata: Metadata = {
@@ -24,7 +26,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={`${newsreader.variable} ${splineSans.variable} antialiased`}>
+      <body className={`${archivoBlack.variable} ${ibmPlexSans.variable} antialiased`}>
         {children}
       </body>
     </html>

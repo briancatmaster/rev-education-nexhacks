@@ -1,0 +1,8 @@
+flask
+flask-cors
+python-dotenv
+langchain==0.3.0
+langchain-openai
+langchain-core
+langchain-community
+pydantic

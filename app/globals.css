@@ -11,9 +11,10 @@ body {
 }
 
 input::placeholder {
-  color: #9aa6b2;
+  color: #7f8ba1;
 }
 
 ::selection {
-  background: #d7e4ef;
+  background: #c7f36b;
+  color: #0a0f1f;
 }

@@ -1,3 +1,7 @@
 {
-  "/page": "app/page.js"
+  "/api/lesson-origin/route": "app/api/lesson-origin/route.js",
+  "/(site)/origin/page": "app/(site)/origin/page.js",
+  "/(site)/page": "app/(site)/page.js",
+  "/(site)/lessons/page": "app/(site)/lessons/page.js",
+  "/(site)/lessons/[lessonId]/page": "app/(site)/lessons/[lessonId]/page.js"
 }
