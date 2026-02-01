@@ -13,8 +13,10 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 OPENROUTER_API_KEY=your-openrouter-key
 GEMINI_API_KEY=your-gemini-key
 TOKEN_COMPANY_API_KEY=your-token-company-key
+FIRECRAWL_API_KEY=your-firecrawl-key
 ZOTERO_CLIENT_KEY=your-zotero-consumer-key
 ZOTERO_CLIENT_SECRET=your-zotero-consumer-secret
+YOUTUBE_API_KEY=your-yt-api-key
 FRONTEND_URL=http://localhost:3000
 ```
 
@@ -44,7 +46,8 @@ npm install
 # Terminal 1
 cd backend
 source .venv/bin/activate
-uvicorn main:app --reload --port 8000
+python3 main.py
+[OLD] uvicorn main:app --reload --port 8000
 
 # Terminal 2
 cd frontend
