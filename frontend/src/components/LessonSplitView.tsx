@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import ReactMarkdown from "react-markdown"
 import remarkMath from "remark-math"
@@ -115,6 +115,12 @@ type TopicInfo = {
   order_index: number
 }
 
+type LessonProgress = {
+  total_topics: number
+  completed_topics: number
+  progress_percentage: number
+}
+
 export default function LessonSplitView() {
   const [lessonContent, setLessonContent] = useState<LessonContent | null>(null)
   const [currentTopic, setCurrentTopic] = useState<TopicInfo | null>(null)
@@ -122,6 +128,7 @@ export default function LessonSplitView() {
   const [isLoadingContent, setIsLoadingContent] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [courseComplete, setCourseComplete] = useState(false)
+  const [lessonProgress, setLessonProgress] = useState<LessonProgress | null>(null)
 
   // Problem interaction state
   const [selectedProblem, setSelectedProblem] = useState<number>(-1)
@@ -147,6 +154,30 @@ export default function LessonSplitView() {
 
   const sessionId = localStorage.getItem("sessionId")
   const userId = localStorage.getItem("onboarding_userId")
+
+  const problemSources = useMemo(() => {
+    const sources = (lessonContent?.problems || [])
+      .map(p => p.source)
+      .filter((s): s is string => !!s && s.trim().length > 0)
+    return Array.from(new Set(sources))
+  }, [lessonContent?.problems])
+
+  const problemSourcesText = useMemo(() => {
+    if (problemSources.length === 0) return "Problems aggregated from educational sources"
+    if (problemSources.length === 1) return `Problems sourced from ${problemSources[0]}`
+    if (problemSources.length === 2) return `Problems sourced from ${problemSources[0]} and ${problemSources[1]}`
+    return `Problems sourced from ${problemSources.slice(0, -1).join(", ")} and ${problemSources[problemSources.length - 1]}`
+  }, [problemSources])
+
+  const sortedProblems = useMemo(() => {
+    const problems = lessonContent?.problems ? [...lessonContent.problems] : []
+    const rank: Record<string, number> = { easy: 0, medium: 1, hard: 2 }
+    return problems.sort((a, b) => {
+      const ra = rank[a.difficulty?.toLowerCase()] ?? 99
+      const rb = rank[b.difficulty?.toLowerCase()] ?? 99
+      return ra - rb
+    })
+  }, [lessonContent?.problems])
 
   // Show simplify button when confusion is detected
   useEffect(() => {
@@ -190,6 +221,24 @@ export default function LessonSplitView() {
     }
   }, [sessionId])
 
+  const fetchLessonProgress = useCallback(async () => {
+    if (!sessionId) return
+
+    try {
+      const res = await fetch(`${API_BASE}/api/lesson/progress/${sessionId}`)
+      const data = await res.json()
+      if (data.success) {
+        setLessonProgress({
+          total_topics: data.total_topics,
+          completed_topics: data.completed_topics,
+          progress_percentage: data.progress_percentage
+        })
+      }
+    } catch (e) {
+      console.error("Failed to load lesson progress:", e)
+    }
+  }, [sessionId])
+
   // Fetch lesson content (non-blocking)
   const fetchLessonContent = useCallback(async () => {
     if (!sessionId || !userId) return
@@ -225,7 +274,8 @@ export default function LessonSplitView() {
   // Initial fetch
   useEffect(() => {
     fetchCurrentTopic()
-  }, [fetchCurrentTopic])
+    fetchLessonProgress()
+  }, [fetchCurrentTopic, fetchLessonProgress])
 
   // Fetch content when topic is available
   useEffect(() => {
@@ -258,6 +308,7 @@ export default function LessonSplitView() {
 
         // Fetch next topic
         fetchCurrentTopic()
+        fetchLessonProgress()
       }
     } catch (e) {
       setError("Failed to complete topic")
@@ -439,9 +490,11 @@ export default function LessonSplitView() {
             </div>
 
             <div className="text-sm text-gray-500">
-              {currentTopic && (
+              {lessonProgress ? (
+                <span>{Math.round(lessonProgress.progress_percentage)}% Mastery</span>
+              ) : currentTopic ? (
                 <span>{Math.round(currentTopic.mastery_level * 100)}% Mastery</span>
-              )}
+              ) : null}
             </div>
             <Button
               onClick={handleCompleteTopic}
@@ -631,7 +684,7 @@ export default function LessonSplitView() {
                 <h2 className="font-serif text-lg text-gray-800">Problem Set</h2>
               </div>
               <p className="text-xs text-gray-500 font-mono">
-                {lessonContent?.problems?.length || 0} problems aggregated from Paul's Math Notes, MIT OCW, AoPS
+                {lessonContent?.problems?.length || 0} {problemSourcesText}
               </p>
             </div>
 
@@ -642,16 +695,13 @@ export default function LessonSplitView() {
                   <div className="w-10 h-10 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin mb-4" />
                   <p className="text-sm text-gray-500 italic">Aggregating problems from educational sources...</p>
                 </div>
-              ) : lessonContent?.problems && lessonContent.problems.length > 0 ? (
+              ) : sortedProblems.length > 0 ? (
                 <div className="space-y-8">
                   {/* Document Title */}
-                  <div className="text-center border-b border-gray-200 pb-4 mb-6">
-                    <h3 className="text-xl font-bold text-gray-800">{lessonContent.topic_name}</h3>
-                    <p className="text-sm text-gray-500 mt-1">Practice Problems</p>
-                  </div>
+                  <div className="text-center border-b border-gray-200 pb-4 mb-6" />
 
                   {/* All Problems */}
-                  {lessonContent.problems.map((problem, index) => (
+                  {sortedProblems.map((problem, index) => (
                     <div key={index} className="problem-block">
                       {/* Problem Header */}
                       <div className="flex items-baseline gap-2 mb-3">
@@ -770,15 +820,15 @@ export default function LessonSplitView() {
                               </div>
                               {problem.answer && (
                                 <div className="mt-4 pt-3 border-t border-green-300">
-                                  <span className="font-bold text-green-800">Answer: </span>
-                                  <span className="text-green-900">
+                                  <div className="font-bold text-green-800">Answer:</div>
+                                  <div className="text-green-900">
                                     <ReactMarkdown
                                       remarkPlugins={[remarkMath]}
                                       rehypePlugins={[rehypeKatex]}
                                     >
                                       {preprocessLatex(problem.answer)}
                                     </ReactMarkdown>
-                                  </span>
+                                  </div>
                                 </div>
                               )}
                             </motion.div>
@@ -787,7 +837,7 @@ export default function LessonSplitView() {
                       </div>
 
                       {/* Problem Separator */}
-                      {index < lessonContent.problems.length - 1 && (
+                      {index < sortedProblems.length - 1 && (
                         <div className="mt-6 border-b border-dashed border-gray-300" />
                       )}
                     </div>
@@ -796,7 +846,7 @@ export default function LessonSplitView() {
                   {/* Document Footer */}
                   <div className="text-center pt-4 border-t border-gray-200 mt-8">
                     <p className="text-xs text-gray-400 font-sans">
-                      Problems aggregated from educational sources
+                      {problemSourcesText}
                     </p>
                   </div>
                 </div>

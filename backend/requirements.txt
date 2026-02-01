@@ -1,5 +1,5 @@
 fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
+uvicorn>=0.27.0
 supabase>=2.0.0
 python-dotenv>=1.0.0
 httpx>=0.26.0
@@ -11,7 +11,6 @@ websockets>=13.0
 # Document Processing (Token Company Integration)
 PyMuPDF>=1.23.0          # PDF text and image extraction
 tokenc>=0.1.0            # Token Company SDK for compression
-Pillow>=10.0.0           # Image processing support
 
 # MCP Server
 mcp>=0.1.0               # Model Context Protocol SDK

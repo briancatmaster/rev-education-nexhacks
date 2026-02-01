@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from typing import Optional, List
 from supabase import create_client, Client
@@ -27,11 +26,16 @@ load_dotenv(env_path)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 TOKEN_COMPANY_API_KEY = os.getenv("TOKEN_COMPANY_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+DEMO_RUN_ID = str(uuid.uuid4())
+PROBLEM_BATCH_SIZE = int(os.getenv("PROBLEM_BATCH_SIZE", "3"))
+PROBLEM_CACHE: dict = {}
+PROBLEM_BATCHES: dict = {}
 
 # Zotero OAuth 1.0a credentials
 ZOTERO_CLIENT_KEY = os.getenv("ZOTERO_CLIENT_KEY", "")
 ZOTERO_CLIENT_SECRET = os.getenv("ZOTERO_CLIENT_SECRET", "")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 # Supabase client (initialized early for worker)
 supabase: Client = create_client(
@@ -39,8 +43,6 @@ supabase: Client = create_client(
     os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 )
 
-# Import document processing worker
-from workers.document_worker import DocumentProcessingWorker
 
 # Import Firecrawl service for chapter extraction
 from services.firecrawl import FirecrawlService, FirecrawlResponse, ChapterOutline
@@ -52,39 +54,7 @@ from services.token_compression import TokenCompressionService
 # Import routers
 from routers.google_drive import router as google_drive_router
 
-# Global worker instance
-document_worker: Optional[DocumentProcessingWorker] = None
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Manage startup and shutdown events."""
-    global document_worker
-
-    # Startup: Initialize and start the document worker
-    if TOKEN_COMPANY_API_KEY:
-        document_worker = DocumentProcessingWorker(
-            supabase_client=supabase,
-            ttc_api_key=TOKEN_COMPANY_API_KEY,
-            poll_interval=30,
-            processing_delay=60,
-            batch_size=10,
-            compression_aggressiveness=0.5
-        )
-        asyncio.create_task(document_worker.start())
-        print("[Main] Document processing worker started")
-    else:
-        print("[Main] TOKEN_COMPANY_API_KEY not set - document worker disabled")
-
-    yield
-
-    # Shutdown: Stop the worker
-    if document_worker:
-        await document_worker.stop()
-        print("[Main] Document processing worker stopped")
-
-
-app = FastAPI(title="arXlearn API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="arXlearn API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -113,6 +83,11 @@ class SessionResponse(BaseModel):
     session_id: str
     user_id: int
     central_topic: str
+
+
+class DemoStatusResponse(BaseModel):
+    demo_mode: bool
+    demo_run_id: str
 
 
 class BackgroundRequest(BaseModel):
@@ -222,6 +197,52 @@ def extract_json_from_response(text: str) -> dict:
         raise
 
 
+async def _compress_prompt_text(text: str) -> tuple[str, bool]:
+    return text, False
+
+
+def _is_generic_or_doc_label(label: str) -> bool:
+    if not label:
+        return True
+    cleaned = label.strip()
+    if len(cleaned) < 2:
+        return True
+
+    lower = cleaned.lower()
+    banned_terms = {
+        "deliverable", "proposal", "report", "document", "resume", "cv",
+        "syllabus", "chapter", "unit", "lesson", "assignment", "paper",
+        "project", "coursework", "course", "module", "notes", "slides",
+        "summary", "draft", "presentation", "outline", "appendix",
+        "bibliography", "introduction", "conclusion", "abstract"
+    }
+
+    if lower in banned_terms:
+        return True
+
+    for term in banned_terms:
+        if lower.startswith(f"{term} ") or lower.endswith(f" {term}") or f" {term} " in lower:
+            return True
+
+    if re.match(r"^(deliverable|project|proposal|report)\s*[ivx]+$", lower):
+        return True
+
+    if re.match(r"^[^a-z]*$", lower):
+        return True
+
+    return False
+
+
+def _filter_generated_nodes(nodes: List[dict]) -> List[dict]:
+    filtered = []
+    for node in nodes or []:
+        label = node.get("label", "")
+        if _is_generic_or_doc_label(label):
+            continue
+        filtered.append(node)
+    return filtered
+
+
 async def call_gemini(prompt: str) -> str:
     """Call Gemini API via REST."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
@@ -236,6 +257,7 @@ async def call_gemini(prompt: str) -> str:
 
 async def generate_background_nodes(central_topic: str, background: str) -> List[dict]:
     """Use Gemini to generate knowledge nodes from CV/background by extracting skills and relating them to the topic."""
+    background, _ = await _compress_prompt_text(background)
     prompt = f"""You are analyzing a person's CV or background description to extract their skills and relate them to their learning topic.
 
 INPUT:
@@ -268,11 +290,12 @@ CONSTRAINTS:
 - Confidence reflects how strong this skill appears in their background (0.5-1.0)
 - relevance_to_topic MUST explain the connection between the skill and "{central_topic}"
 - Return exactly 5-6 nodes
-- Focus on skills that have clear relevance to their learning topic"""
+- Focus on skills that have clear relevance to their learning topic
+- Do NOT output generic document words like \"deliverable\", \"proposal\", or \"report\""""
 
     response_text = await call_gemini(prompt)
     result = extract_json_from_response(response_text)
-    return result.get("nodes", [])
+    return _filter_generated_nodes(result.get("nodes", []))
 
 
 async def generate_paper_nodes(central_topic: str, existing_nodes: List[str], paper_titles: List[str]) -> List[dict]:
@@ -315,17 +338,18 @@ CONSTRAINTS:
 
     response_text = await call_gemini(prompt)
     result = extract_json_from_response(response_text)
-    return result.get("nodes", [])
+    return _filter_generated_nodes(result.get("nodes", []))
 
 
 async def generate_single_paper_nodes(paper_title: str) -> List[dict]:
     """Lightweight Gemini call for a single paper - generates 3 key concepts from title only."""
     prompt = f"""From paper title "{paper_title}", extract 3 key concepts.
+Do NOT return generic document terms (e.g., deliverable, proposal, report, paper).
 Return JSON only: {{"nodes":[{{"label":"1-2 words","type":"concept|method|theory|tool","mastery_estimate":0.7}}]}}"""
 
     response_text = await call_gemini(prompt)
     result = extract_json_from_response(response_text)
-    return result.get("nodes", [])
+    return _filter_generated_nodes(result.get("nodes", []))
 
 
 # ============ Zotero OAuth 1.0a Helpers ============
@@ -519,6 +543,12 @@ async def create_session(request: SessionCreateRequest):
         user_id=request.user_id,
         central_topic=request.central_topic
     )
+
+
+@app.get("/api/demo/status", response_model=DemoStatusResponse)
+async def get_demo_status():
+    """Expose demo mode status and run id for client-side resets."""
+    return DemoStatusResponse(demo_mode=DEMO_MODE, demo_run_id=DEMO_RUN_ID)
 
 
 @app.post("/api/profile/cv", response_model=NodesResponse)
@@ -1252,14 +1282,9 @@ async def get_zotero_items(user_id: int, limit: int = 100):
 @app.get("/api/worker/status")
 async def get_worker_status():
     """Get document processing worker status and statistics."""
-    if document_worker:
-        return {
-            "enabled": True,
-            **document_worker.get_stats()
-        }
     return {
         "enabled": False,
-        "reason": "TOKEN_COMPANY_API_KEY not configured"
+        "reason": "Document worker removed"
     }
 
 
@@ -1964,15 +1989,17 @@ OUTPUT FORMAT (strict JSON, no markdown):
 CONSTRAINTS:
 - Focus on concepts that bridge the coursework to the learning topic
 - Return 4-6 nodes
-- Labels should be concise (1-3 words)"""
+- Labels should be concise (1-3 words)
+- Do NOT output generic document words like \"chapter\", \"unit\", \"lesson\", or \"deliverable\""""
 
     response_text = await call_gemini(prompt)
     result = extract_json_from_response(response_text)
-    return result.get("nodes", [])
+    return _filter_generated_nodes(result.get("nodes", []))
 
 
 async def extract_courses_from_transcript(transcript_text: str) -> List[str]:
     """Extract course names from academic transcript text."""
+    transcript_text, _ = await _compress_prompt_text(transcript_text)
     prompt = f"""Extract all course names/titles from this academic transcript.
 
 TRANSCRIPT TEXT:
@@ -2029,11 +2056,12 @@ CONSTRAINTS:
 - Labels should be concise (1-2 words)
 - confidence reflects how certain the course covers this topic
 - mastery_estimate reflects expected proficiency from taking the course
-- Return 5-8 nodes that bridge their coursework to their learning goal"""
+- Return 5-8 nodes that bridge their coursework to their learning goal
+- Do NOT output generic document words like \"course\", \"module\", or \"deliverable\""""
 
     response_text = await call_gemini(prompt)
     result = extract_json_from_response(response_text)
-    return result.get("nodes", [])
+    return _filter_generated_nodes(result.get("nodes", []))
 
 
 # =============================================================================
@@ -2076,6 +2104,7 @@ class PrerequisitesConfirmResponse(BaseModel):
 async def generate_prerequisites_for_topic(central_topic: str, user_background: List[str]) -> dict:
     """Use Gemini to generate true prerequisites for learning a topic."""
     background_formatted = "\n".join([f"- {b}" for b in user_background]) if user_background else "None provided"
+    background_formatted, _ = await _compress_prompt_text(background_formatted)
 
     prompt = f"""You are an expert educator creating a learning path for a student.
 
@@ -2089,6 +2118,7 @@ Identify the TRUE PREREQUISITES needed to understand "{central_topic}". These sh
 1. Foundational concepts that MUST be understood first
 2. Ordered from most basic to most advanced
 3. Realistic - what would a textbook chapter sequence look like?
+4. Adapt to what the student already knows (deprioritize or drop known items)
 
 For each prerequisite, assess:
 - confidence: How confident are you this is truly needed? (0.0-1.0)
@@ -2115,7 +2145,8 @@ CONSTRAINTS:
 - is_foundational=true for the first 3-5 most basic concepts
 - Be specific: "Linear Algebra Basics" not just "Math"
 - Consider what someone would need to read in a textbook BEFORE the target topic
-- Skip anything the student already knows based on their background"""
+- If a prerequisite overlaps with the student's background, either skip it or set confidence < 0.5
+- Prefer prerequisites that fill gaps in the student's knowledge over ones they already know"""
 
     response_text = await call_gemini(prompt)
     result = extract_json_from_response(response_text)
@@ -2460,6 +2491,7 @@ async def get_learning_path(session_id: str):
 
 # Load OpenRouter API key for content aggregation
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-4o-mini")
 PREREQ_LOW_THRESHOLD = float(os.getenv("PREREQ_LOW_THRESHOLD", "0.3"))
 PREREQ_HIGH_THRESHOLD = float(os.getenv("PREREQ_HIGH_THRESHOLD", "0.7"))
 
@@ -2602,15 +2634,21 @@ async def get_next_activity(session_id: str, user_id: int):
             )
         
         # Generate new activity using content aggregator
-        if not OPENROUTER_API_KEY:
-            return NextActivityResponse(success=False, error="OPENROUTER_API_KEY not configured")
-        
         aggregator = ContentAggregator(OPENROUTER_API_KEY, os.getenv("OPENALEX_API_KEY"))
+        used_aggregator_search = False
         
         # Determine activity type based on count
         if activity_count == 0:
             # First activity: video
             content_items = await aggregator.search_youtube(topic_name, max_results=1)
+            if not content_items:
+                search_result = await aggregator.search_content_for_topic(
+                    topic_name,
+                    content_types=[ContentType.VIDEO],
+                    max_items=1
+                )
+                content_items = search_result.items
+                used_aggregator_search = True
         elif activity_count == 1:
             # Second activity: reading
             content_items = await aggregator.search_openalex(topic_name, max_results=1)
@@ -2622,8 +2660,9 @@ async def get_next_activity(session_id: str, user_id: int):
             # Mix of videos and readings
             search_result = await aggregator.search_content_for_topic(topic_name, max_items=1)
             content_items = search_result.items
+            used_aggregator_search = True
         
-        if not content_items:
+        if not content_items and not used_aggregator_search:
             # Fallback: try general search
             search_result = await aggregator.search_content_for_topic(topic_name, max_items=1)
             content_items = search_result.items
@@ -2920,11 +2959,12 @@ async def generate_simplified_lesson(
 
     context_prompt = ""
     if current_content:
+        compressed_content, _ = await _compress_prompt_text(current_content)
         context_prompt = f"""
 
 The student was previously shown this content but found it confusing:
 ---
-{current_content[:2000]}
+{compressed_content[:2000]}
 ---
 
 Your task is to explain the SAME concepts but at a SIMPLER level.
@@ -2967,6 +3007,7 @@ Output ONLY the Markdown lesson content."""
 async def generate_lesson_text(topic: str, user_background: List[str]) -> str:
     """Generate comprehensive lesson text using Gemini."""
     background_str = ", ".join(user_background[:5]) if user_background else "general audience"
+    background_str, _ = await _compress_prompt_text(background_str)
 
     prompt = f"""Create a comprehensive lesson on: "{topic}"
 
@@ -2997,21 +3038,24 @@ About 600-1000 words. Start directly with the content - no code fences."""
     return response
 
 
-async def scrape_math_problems_from_sources(topic: str, num_problems: int = 5) -> List[dict]:
+async def scrape_math_problems_from_sources(topic: str, num_problems: int = 3) -> List[dict]:
     """
     Use OpenRouter's browse model to find math problems from educational sources.
-    Sources: Paul's Math Notes, MIT OCW, AoPS, Khan Academy
+    Top Sources Include: Paul's Math Notes, MIT OCW, AoPS, Khan Academy
     """
     if not OPENROUTER_API_KEY:
         return []
 
     prompt = f"""Find practice problems for the topic: "{topic}"
 
-Search these educational sources:
+If relevant to the topic at hand, search these educational sources:
 1. Paul's Math Notes (tutorial.math.lamar.edu)
 2. MIT OpenCourseWare (ocw.mit.edu)
 3. Art of Problem Solving (artofproblemsolving.com)
 4. Khan Academy (khanacademy.org)
+
+**OTHERWISE:** You decide which websites are best to search for problems to teach the user
+and give them practice so they can get closer to topic mastery.
 
 For each problem found, extract:
 - The complete problem statement (include any LaTeX math notation)
@@ -3019,7 +3063,7 @@ For each problem found, extract:
 - The solution or answer
 - The source URL
 
-Return a JSON array with {num_problems} problems:
+    Return a JSON array with {num_problems} problems:
 [
   {{
     "problem": "Problem statement with $LaTeX$ math notation",
@@ -3052,13 +3096,19 @@ IMPORTANT:
                     "model": "openai/gpt-4o-mini:online",
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.3,
-                    "max_tokens": 3000,
+                    "max_tokens": 2200,
                     # Enable web search plugin for real results from educational sites
                     "plugins": [
                         {
                             "id": "web",
-                            "max_results": 10,
-                            "search_prompt": f"Search for math practice problems about {topic} from tutorial.math.lamar.edu, ocw.mit.edu, artofproblemsolving.com, khanacademy.org:"
+                            "max_results": 3,
+                            "search_prompt": (
+                                f"Search for practice problems about {topic}. "
+                                "Prefer: tutorial.math.lamar.edu, ocw.mit.edu, artofproblemsolving.com, "
+                                "khanacademy.org, openstax.org, math.libretexts.org, libretexts.org. "
+                                "Avoid: chegg.com, coursehero.com, quizlet.com, bartleby.com, slader.com, "
+                                "brainly.com, studocu.com, pinterest.com, reddit.com."
+                            )
                         }
                     ]
                 },
@@ -3073,11 +3123,323 @@ IMPORTANT:
         json_match = re.search(r'\[[\s\S]*\]', content)
         if json_match:
             problems = json.loads(json_match.group())
+
+            # First pass: infer source from URL when possible
+            for p in problems:
+                inferred = _source_from_url(p.get("source_url", ""))
+                if inferred:
+                    p["source"] = inferred
+                elif _is_generic_source(p.get("source", "")):
+                    p["source"] = ""
+
+            # Second pass: use non-search LLM to infer remaining sources
+            problems = await _infer_problem_sources_with_llm(problems)
             return problems
     except Exception as e:
         print(f"[LessonContent] Problem scraping failed: {e}")
 
     return []
+
+
+async def scrape_math_problems_batch(topics: List[str], num_problems: int = 2) -> dict:
+    """
+    Use OpenRouter's browse model to find problems for multiple topics in one call.
+    Returns a dict: { "Topic Name": [problems...] }.
+    """
+    if not OPENROUTER_API_KEY or not topics:
+        return {}
+
+    topics_list = "\n".join([f"- {t}" for t in topics])
+
+    prompt = f"""Find practice problems for EACH of these topics:
+{topics_list}
+
+If relevant to the topic at hand, search these educational sources:
+1. Paul's Math Notes (tutorial.math.lamar.edu)
+2. MIT OpenCourseWare (ocw.mit.edu)
+3. Art of Problem Solving (artofproblemsolving.com)
+4. Khan Academy (khanacademy.org)
+
+OTHERWISE: choose the best reputable educational sources for that topic.
+
+For each topic, return {num_problems} problems. For each problem include:
+- The complete problem statement (include any LaTeX math notation)
+- Hints if available
+- The solution or answer
+- The source URL
+
+Return JSON only in this format:
+{{
+  "topics": [
+    {{
+      "topic": "Topic Name",
+      "problems": [
+        {{
+          "problem": "Problem statement with $LaTeX$ math notation",
+          "hints": ["Hint 1", "Hint 2"],
+          "solution": "Step-by-step solution with $LaTeX$",
+          "answer": "Final answer",
+          "source": "Paul's Math Notes",
+          "source_url": "https://...",
+          "difficulty": "easy/medium/hard"
+        }}
+      ]
+    }}
+  ]
+}}
+
+IMPORTANT:
+- Preserve all mathematical notation in LaTeX format
+- Include complete problem statements
+- If you can't find actual problems, generate realistic ones in the style of these sources
+- Return ONLY the JSON object"""
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://arxlearn.app",
+                    "X-Title": "arXlearn"
+                },
+                json={
+                    "model": "openai/gpt-4o-mini:online",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                    "max_tokens": 2200,
+                    "plugins": [
+                        {
+                            "id": "web",
+                            "max_results": 3,
+                            "search_prompt": (
+                                f"Search for practice problems about: {', '.join(topics)}. "
+                                "Prefer: tutorial.math.lamar.edu, ocw.mit.edu, artofproblemsolving.com, "
+                                "khanacademy.org, openstax.org, math.libretexts.org, libretexts.org. "
+                                "Avoid: chegg.com, coursehero.com, quizlet.com, bartleby.com, slader.com, "
+                                "brainly.com, studocu.com, pinterest.com, reddit.com."
+                            )
+                        }
+                    ]
+                },
+                timeout=60.0
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        content = data["choices"][0]["message"]["content"]
+        parsed = extract_json_from_response(content)
+        topic_items = parsed.get("topics", []) if isinstance(parsed, dict) else []
+
+        by_topic = {}
+        for item in topic_items:
+            name = item.get("topic")
+            problems = item.get("problems", [])
+            if name and isinstance(problems, list):
+                by_topic[name] = problems
+
+        # Normalize sources for each topic
+        for name, problems in by_topic.items():
+            for p in problems:
+                inferred = _source_from_url(p.get("source_url", ""))
+                if inferred:
+                    p["source"] = inferred
+                elif _is_generic_source(p.get("source", "")):
+                    p["source"] = ""
+            by_topic[name] = await _infer_problem_sources_with_llm(problems)
+
+        return by_topic
+    except Exception as e:
+        print(f"[LessonContent] Batch problem scraping failed: {e}")
+
+    return {}
+
+
+def _source_from_url(source_url: str) -> Optional[str]:
+    if not source_url:
+        return None
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(source_url).netloc.lower()
+    except Exception:
+        return None
+
+    domain_map = {
+        "tutorial.math.lamar.edu": "Paul's Math Notes",
+        "ocw.mit.edu": "MIT OCW",
+        "artofproblemsolving.com": "AoPS",
+        "khanacademy.org": "Khan Academy",
+        "openstax.org": "OpenStax",
+        "math.libretexts.org": "LibreTexts",
+        "libretexts.org": "LibreTexts",
+        "edx.org": "edX",
+        "coursera.org": "Coursera",
+        "mit.edu": "MIT",
+    }
+
+    for domain, label in domain_map.items():
+        if host == domain or host.endswith(f".{domain}"):
+            return label
+
+    return None
+
+
+def _is_generic_source(source: str) -> bool:
+    if not source:
+        return True
+    lower = source.strip().lower()
+    return lower in {"source", "unknown", "generated", "educational source", "educational sources", "web"}
+
+
+async def _infer_problem_sources_with_llm(problems: List[dict]) -> List[dict]:
+    if not OPENROUTER_API_KEY or not problems:
+        return problems
+
+    items = []
+    for idx, p in enumerate(problems):
+        items.append({
+            "index": idx,
+            "source": p.get("source", ""),
+            "source_url": p.get("source_url", "")
+        })
+
+    prompt = f"""Infer the most accurate source label for each item using BOTH source and source_url.
+Return JSON only in this format:
+{{"sources":[{{"index":0,"source":"Label"}}]}}
+
+Rules:
+- Prefer the domain in source_url when present
+- Use short labels like "Paul's Math Notes", "MIT OCW", "AoPS", "Khan Academy"
+- If unclear, use "Educational source"
+
+Items:
+{json.dumps(items, indent=2)}
+"""
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://arxlearn.app",
+                    "X-Title": "arXlearn"
+                },
+                json={
+                    "model": DEFAULT_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.0,
+                    "max_tokens": 300
+                },
+                timeout=30.0
+            )
+            response.raise_for_status()
+            data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        parsed = extract_json_from_response(content)
+        sources = {s.get("index"): s.get("source") for s in parsed.get("sources", [])}
+        for idx, p in enumerate(problems):
+            inferred = sources.get(idx)
+            if inferred and not _is_generic_source(inferred):
+                p["source"] = inferred
+            elif _is_generic_source(p.get("source", "")):
+                p["source"] = ""
+    except Exception as e:
+        print(f"[LessonContent] Source inference failed: {e}")
+
+    return problems
+
+
+async def _get_batched_problems(
+    session_id: str,
+    topic_name: str,
+    order_index: int,
+    num_problems: int
+) -> List[dict]:
+    session_cache = PROBLEM_CACHE.setdefault(session_id, {})
+    if topic_name in session_cache:
+        return session_cache[topic_name]
+
+    # Normalize order_index for reliable comparisons
+    try:
+        order_index_value = int(order_index)
+    except Exception:
+        order_index_value = None
+
+    batch = PROBLEM_BATCHES.get(session_id)
+    if batch:
+        try:
+            start_index = int(batch.get("start_index", -1))
+        except Exception:
+            start_index = -1
+        if order_index_value is not None and start_index <= order_index_value < start_index + PROBLEM_BATCH_SIZE:
+            problems_by_topic = batch.get("problems_by_topic", {})
+            if topic_name in problems_by_topic:
+                session_cache[topic_name] = problems_by_topic.get(topic_name, [])
+                return session_cache[topic_name]
+
+    # If order_index is missing, derive it from topic ordering
+    if order_index_value is None:
+        try:
+            topics_result = supabase.table("lesson_topics").select("topic_name, order_index").eq(
+                "session_id", session_id
+            ).eq("is_confirmed", True).order("order_index").execute()
+            ordered = topics_result.data or []
+            for t in ordered:
+                if t.get("topic_name") == topic_name:
+                    try:
+                        order_index_value = int(t.get("order_index"))
+                    except Exception:
+                        order_index_value = None
+                    break
+        except Exception:
+            order_index_value = None
+
+    # Final fallback to 0 if still unknown
+    if order_index_value is None:
+        order_index_value = 0
+
+    # Create a new batch starting at the current topic
+    batch_topics = []
+    try:
+        topics_result = supabase.table("lesson_topics").select("topic_name, order_index").eq(
+            "session_id", session_id
+        ).eq("is_confirmed", True).order("order_index").execute()
+
+        for t in topics_result.data or []:
+            try:
+                idx_value = int(t.get("order_index"))
+            except Exception:
+                idx_value = None
+            if t.get("topic_name") and idx_value is not None and order_index_value <= idx_value < order_index_value + PROBLEM_BATCH_SIZE:
+                batch_topics.append(t.get("topic_name"))
+    except Exception:
+        batch_topics = []
+
+    if not batch_topics:
+        batch_topics = [topic_name]
+
+    problems_by_topic = await scrape_math_problems_batch(batch_topics, num_problems)
+    problems = problems_by_topic.get(topic_name, [])
+    if not problems:
+        problems = await scrape_math_problems_from_sources(topic_name, num_problems)
+
+    PROBLEM_BATCHES[session_id] = {
+        "start_index": order_index_value,
+        "problems_by_topic": problems_by_topic
+    }
+
+    # Pre-fill cache for topics in this batch
+    for name, probs in (problems_by_topic or {}).items():
+        if name:
+            session_cache[name] = probs
+
+    if topic_name not in session_cache:
+        session_cache[topic_name] = problems
+
+    return session_cache[topic_name]
 
 
 @app.post("/api/lesson/content", response_model=LessonContentResponse)
@@ -3112,7 +3474,10 @@ async def get_lesson_content(request: LessonContentRequest):
         # Generate lesson text, fetch video, and scrape problems in parallel
         import asyncio
         lesson_task = asyncio.create_task(generate_lesson_text(topic_name, user_background))
-        problems_task = asyncio.create_task(scrape_math_problems_from_sources(topic_name, 5))
+        order_index = topic_data.get("order_index", 0)
+        problems_task = asyncio.create_task(
+            _get_batched_problems(request.session_id, topic_name, order_index, 3)
+        )
         video_task = asyncio.create_task(aggregator.search_youtube(topic_name, max_results=1)) if aggregator else None
 
         # Wait for all with timeout (don't block indefinitely)

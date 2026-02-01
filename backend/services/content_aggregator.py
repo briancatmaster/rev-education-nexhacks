@@ -11,6 +11,7 @@ import re
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
+from .token_compression import TokenCompressionService
 
 
 class ContentType(str, Enum):
@@ -59,6 +60,16 @@ class ContentAggregator:
         self.openrouter_api_key = openrouter_api_key
         self.openalex_api_key = openalex_api_key
         self.browse_model = "openai/gpt-4o-mini:online"
+        self._cache: Dict[str, List[ContentItem]] = {}
+        self._yt_cache: Dict[str, List[ContentItem]] = {}
+        self._compression_service: Optional[TokenCompressionService] = None
+        self.youtube_api_key = os.getenv("YOUTUBE_API_KEY")
+
+        if os.getenv("TOKEN_COMPANY_API_KEY"):
+            try:
+                self._compression_service = TokenCompressionService()
+            except Exception:
+                self._compression_service = None
     
     async def search_content_for_topic(
         self,
@@ -82,12 +93,42 @@ class ContentAggregator:
         if content_types is None:
             content_types = [ContentType.VIDEO, ContentType.READING]
         
+        cache_key = f"{topic.lower()}::{','.join(sorted(ct.value for ct in content_types))}::{max_items}"
+        if cache_key in self._cache:
+            return ContentSearchResult(success=True, items=self._cache[cache_key])
+
+        # Local-first search to avoid unnecessary OpenRouter calls.
+        local_items = await self._search_local_sources(topic, content_types, max_items)
+        if local_items:
+            self._cache[cache_key] = local_items
+            return ContentSearchResult(success=True, items=local_items)
+
+        if not self.openrouter_api_key:
+            return ContentSearchResult(success=False, items=[], error="OPENROUTER_API_KEY not configured")
+
         try:
-            # Use OpenRouter's browsing model to find content
             items = await self._search_with_openrouter(topic, user_background, content_types, max_items)
+            self._cache[cache_key] = items
             return ContentSearchResult(success=True, items=items)
         except Exception as e:
             return ContentSearchResult(success=False, items=[], error=str(e))
+
+    async def _search_local_sources(
+        self,
+        topic: str,
+        content_types: List[ContentType],
+        max_items: int
+    ) -> List[ContentItem]:
+        """Search local non-LLM sources first to reduce OpenRouter usage."""
+        items: List[ContentItem] = []
+
+        if ContentType.VIDEO in content_types and len(items) < max_items:
+            items.extend(await self.search_youtube(topic, max_results=max_items - len(items)))
+
+        if ContentType.READING in content_types and len(items) < max_items:
+            items.extend(await self.search_openalex(topic, max_results=max_items - len(items)))
+
+        return items[:max_items]
     
     async def _search_with_openrouter(
         self,
@@ -99,7 +140,11 @@ class ContentAggregator:
         """Use OpenRouter's browsing model to search for content."""
         
         types_str = ", ".join([ct.value for ct in content_types])
-        background_context = f"\nUser background: {user_background}" if user_background else ""
+        background_context = ""
+        if user_background:
+            background_text, was_compressed = await self._maybe_compress_background(user_background)
+            label = "User background (compressed)" if was_compressed else "User background"
+            background_context = f"\n{label}: {background_text}"
         
         prompt = f"""Find educational content for learning about: "{topic}"{background_context}
 
@@ -152,12 +197,12 @@ Return ONLY the JSON array, no other text."""
                         {"role": "user", "content": prompt}
                     ],
                     "temperature": 0.3,
-                    "max_tokens": 2000,
+                    "max_tokens": 1500,
                     # Enable web search plugin for real-time results
                     "plugins": [
                         {
                             "id": "web",
-                            "max_results": 10,
+                            "max_results": 3,
                             "search_prompt": "Search for educational content and return accurate URLs:"
                         }
                     ]
@@ -170,6 +215,21 @@ Return ONLY the JSON array, no other text."""
         content_text = data["choices"][0]["message"]["content"]
         items = self._parse_content_response(content_text)
         return items
+
+    async def _maybe_compress_background(self, text: str) -> tuple[str, bool]:
+        """Compress long background context to reduce OpenRouter token usage."""
+        if not self._compression_service or len(text) < 800:
+            return text, False
+
+        try:
+            result = await self._compression_service.compress_for_notes(text)
+        except Exception:
+            return text, False
+
+        if not result.success or result.compression_ratio >= 0.95:
+            return text, False
+
+        return result.compressed_text, True
     
     def _parse_content_response(self, response_text: str) -> List[ContentItem]:
         """Parse the OpenRouter response into ContentItems."""
@@ -252,7 +312,11 @@ Return ONLY the JSON array, no other text."""
             return video_id_or_url
     
     async def search_youtube(self, topic: str, max_results: int = 3) -> List[ContentItem]:
-        """Search YouTube specifically for educational videos using direct search."""
+        """Search YouTube for educational videos using the YouTube Data API v3, with fallback to a known library."""
+        cache_key = f"{topic.lower()}::{max_results}"
+        if cache_key in self._yt_cache:
+            return self._yt_cache[cache_key]
+
         # Use well-known educational video IDs for common math topics as fallback
         KNOWN_VIDEOS = {
             "arithmetic": {"id": "NybHckSEQBI", "title": "Arithmetic - Basic Math", "channel": "The Organic Chemistry Tutor"},
@@ -272,37 +336,145 @@ Return ONLY the JSON array, no other text."""
             "activation function": {"id": "m0pIlLfpXWE", "title": "Activation Functions", "channel": "DeepLizard"},
             "loss function": {"id": "Skc8KQgiDpY", "title": "Loss Functions", "channel": "ritvikmath"},
         }
-        
-        # Find matching video from known library
-        topic_lower = topic.lower()
-        items = []
-        
-        for keyword, video_data in KNOWN_VIDEOS.items():
-            if keyword in topic_lower or any(word in topic_lower for word in keyword.split()):
-                items.append(ContentItem(
+
+        async def _fetch_youtube_results() -> List[ContentItem]:
+            if not self.youtube_api_key:
+                return []
+
+            search_url = "https://www.googleapis.com/youtube/v3/search"
+            params = {
+                "part": "snippet",
+                "q": topic,
+                "type": "video",
+                "maxResults": min(max_results * 3, 25),
+                "safeSearch": "moderate",
+                "videoEmbeddable": "true",
+                "order": "viewCount",
+                "relevanceLanguage": "en",
+                "regionCode": "US",
+                "key": self.youtube_api_key,
+            }
+
+            async with httpx.AsyncClient() as client:
+                response = await client.get(search_url, params=params, timeout=15.0)
+                response.raise_for_status()
+                data = response.json()
+
+            items = data.get("items", [])
+            video_ids = [item.get("id", {}).get("videoId") for item in items]
+            video_ids = [vid for vid in video_ids if vid]
+
+            # Fetch details to enforce duration >= 2:30 and rank by view count.
+            details_by_id = {}
+            if video_ids:
+                videos_url = "https://www.googleapis.com/youtube/v3/videos"
+                params = {
+                    "part": "contentDetails,statistics,snippet",
+                    "id": ",".join(video_ids[:50]),
+                    "key": self.youtube_api_key,
+                }
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(videos_url, params=params, timeout=15.0)
+                    response.raise_for_status()
+                    data = response.json()
+
+                for item in data.get("items", []):
+                    details_by_id[item.get("id")] = {
+                        "duration": item.get("contentDetails", {}).get("duration"),
+                        "views": int(item.get("statistics", {}).get("viewCount", 0)),
+                        "title": item.get("snippet", {}).get("title"),
+                        "channel": item.get("snippet", {}).get("channelTitle"),
+                        "description": item.get("snippet", {}).get("description"),
+                    }
+
+            def _parse_iso8601_duration(duration: str) -> int:
+                # Returns duration in seconds.
+                if not duration:
+                    return 0
+                match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", duration)
+                if not match:
+                    return 0
+                hours = int(match.group(1) or 0)
+                minutes = int(match.group(2) or 0)
+                seconds = int(match.group(3) or 0)
+                return hours * 3600 + minutes * 60 + seconds
+
+            results = []
+            ranked = []
+            for item in items:
+                vid = item.get("id", {}).get("videoId")
+                if not vid:
+                    continue
+
+                details = details_by_id.get(vid, {})
+                duration = _parse_iso8601_duration(details.get("duration", ""))
+                # Skip shorts or very short videos (< 2:30)
+                if duration and duration < 150:
+                    continue
+                if duration and duration > 15 * 60:
+                    continue
+
+                ranked.append((details.get("views", 0), vid, details))
+
+            ranked.sort(key=lambda item: item[0], reverse=True)
+
+            for _, vid, details in ranked:
+                results.append(ContentItem(
                     content_type=ContentType.VIDEO,
                     source_type=SourceType.YOUTUBE,
-                    title=video_data["title"],
-                    embed_url=f"https://www.youtube-nocookie.com/embed/{video_data['id']}",
-                    source_title=video_data["channel"],
-                    duration_minutes=15
+                    title=details.get("title") or "YouTube Video",
+                    embed_url=f"https://www.youtube.com/embed/{vid}",
+                    source_title=details.get("channel"),
+                    duration_minutes=max(1, _parse_iso8601_duration(details.get("duration", "")) // 60) if details.get("duration") else None,
+                    description=details.get("description")
                 ))
-                if len(items) >= max_results:
+
+                if len(results) >= max_results:
                     break
-        
-        # If no match found, use a general math video
-        if not items:
+
+            return results
+
+        # Try YouTube API first
+        try:
+            api_results = await _fetch_youtube_results()
+            if api_results:
+                self._yt_cache[cache_key] = api_results
+                return api_results
+        except Exception as e:
+            print(f"[ContentAggregator] YouTube API search failed: {e}")
+
+        # Fallback to known library
+        topic_lower = topic.lower()
+        items = []
+        topic_tokens = {t for t in re.split(r"[^a-z0-9]+", topic_lower) if t}
+
+        ranked_matches = []
+        for keyword, video_data in KNOWN_VIDEOS.items():
+            score = 0
+            keyword_lower = keyword.lower()
+            if keyword_lower in topic_lower:
+                score += 3
+            for token in keyword_lower.split():
+                if token in topic_tokens:
+                    score += 1
+            if score > 0:
+                ranked_matches.append((score, video_data))
+
+        ranked_matches.sort(key=lambda item: item[0], reverse=True)
+
+        for score, video_data in ranked_matches[:max_results]:
             items.append(ContentItem(
                 content_type=ContentType.VIDEO,
                 source_type=SourceType.YOUTUBE,
-                title=f"Learning: {topic}",
-                embed_url=f"https://www.youtube-nocookie.com/embed/NybHckSEQBI",
-                source_title="The Organic Chemistry Tutor",
+                title=video_data["title"],
+                embed_url=f"https://www.youtube.com/embed/{video_data['id']}",
+                source_title=video_data["channel"],
                 duration_minutes=15
             ))
-        
+
+        self._yt_cache[cache_key] = items
         return items
-    
+
     async def search_openalex(self, topic: str, max_results: int = 3) -> List[ContentItem]:
         """Search OpenAlex for academic papers."""
         items = []

@@ -37,11 +37,11 @@ class TokenCompressionService:
 
     # Aggressiveness presets for different use cases
     PRESETS = {
-        "conservative": 0.3,   # Preserve most detail
-        "balanced": 0.5,       # Good balance
-        "aggressive": 0.7,     # Maximum savings
-        "academic": 0.4,       # Recommended for papers - preserves technical detail
-        "notes": 0.6,          # Good for user notes
+        "conservative": 0.35,  # Preserve most detail
+        "balanced": 0.55,      # Good balance with extra savings
+        "aggressive": 0.75,    # Maximum savings (use sparingly)
+        "academic": 0.5,       # Preserve technical detail with modest savings
+        "notes": 0.65,         # Higher savings for informal notes
     }
 
     def __init__(self, api_key: Optional[str] = None, timeout: int = 60):
@@ -220,7 +220,7 @@ class TokenCompressionService:
         """
         return await self.compress_text(
             text,
-            aggressiveness=0.6,  # Aggressive for web content
+            aggressiveness=0.7,  # Aggressive for web content
             preserve_placeholders=True
         )
 
@@ -232,7 +232,7 @@ class TokenCompressionService:
         """
         return await self.compress_text(
             text,
-            aggressiveness=0.5,
+            aggressiveness=0.6,
             preserve_placeholders=True
         )
 
