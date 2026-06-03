@@ -11,7 +11,6 @@ import asyncio
 import json
 import uuid
 import os
-import httpx
 import re
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Callable
@@ -19,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from services.token_compression import TokenCompressionService
+from services.llm_provider import generate_text
 
 
 @dataclass
@@ -617,24 +617,13 @@ Return ONLY valid JSON with no markdown formatting or code blocks."""
         ).eq("id", job_id).execute()
 
     async def _call_gemini(self, prompt: str) -> str:
-        """Call Gemini API via REST."""
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.gemini_api_key}"
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "temperature": 0.7,
-                        "maxOutputTokens": 8192
-                    }
-                },
-                timeout=120.0
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"]
+        """Compatibility wrapper: route legacy Gemini calls through the configured provider."""
+        return await generate_text(
+            prompt,
+            task="learning_path_pipeline",
+            max_tokens=8192,
+            temperature=0.7
+        )
 
     def _extract_json(self, text: str) -> Dict:
         """Extract JSON from response, handling markdown code blocks."""

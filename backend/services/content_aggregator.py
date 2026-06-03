@@ -1,17 +1,19 @@
 """
 Content Aggregator Service
 
-Uses OpenRouter's gpt-4o-mini:online model to search and aggregate
-educational content from YouTube, OpenAlex, Khan Academy, MIT OCW, and web.
+Uses local educational APIs first, then the configured LLM provider to search
+and aggregate content from YouTube, OpenAlex, Khan Academy, MIT OCW, and web.
 """
 import os
 import httpx
 import json
 import re
+from urllib.parse import parse_qs, urlparse
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
 from .token_compression import TokenCompressionService
+from .llm_provider import extract_json_from_response, generate_json, generate_text
 
 
 class ContentType(str, Enum):
@@ -52,8 +54,8 @@ class ContentSearchResult:
 
 class ContentAggregator:
     """
-    Aggregates educational content from multiple sources using OpenRouter's
-    browsing-enabled model.
+    Aggregates educational content from multiple sources using local APIs
+    plus the configured Claude-first LLM provider.
     """
     
     def __init__(self, openrouter_api_key: str, openalex_api_key: Optional[str] = None):
@@ -103,9 +105,6 @@ class ContentAggregator:
             self._cache[cache_key] = local_items
             return ContentSearchResult(success=True, items=local_items)
 
-        if not self.openrouter_api_key:
-            return ContentSearchResult(success=False, items=[], error="OPENROUTER_API_KEY not configured")
-
         try:
             items = await self._search_with_openrouter(topic, user_background, content_types, max_items)
             self._cache[cache_key] = items
@@ -137,7 +136,7 @@ class ContentAggregator:
         content_types: List[ContentType],
         max_items: int
     ) -> List[ContentItem]:
-        """Use OpenRouter's browsing model to search for content."""
+        """Use the configured provider's search-capable model to search for content."""
         
         types_str = ", ".join([ct.value for ct in content_types])
         background_context = ""
@@ -182,37 +181,14 @@ Focus on:
 
 Return ONLY the JSON array, no other text."""
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.openrouter_api_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://arxlearn.app",
-                    "X-Title": "arXlearn"
-                },
-                json={
-                    "model": self.browse_model,
-                    "messages": [
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.3,
-                    "max_tokens": 1500,
-                    # Enable web search plugin for real-time results
-                    "plugins": [
-                        {
-                            "id": "web",
-                            "max_results": 3,
-                            "search_prompt": "Search for educational content and return accurate URLs:"
-                        }
-                    ]
-                },
-                timeout=60.0
-            )
-            response.raise_for_status()
-            data = response.json()
-        
-        content_text = data["choices"][0]["message"]["content"]
+        content_text = await generate_text(
+            prompt,
+            task="content_search",
+            use_search=True,
+            max_tokens=1500,
+            temperature=0.3,
+            search_prompt="Search for educational content and return accurate URLs:"
+        )
         items = self._parse_content_response(content_text)
         return items
 
@@ -234,27 +210,47 @@ Return ONLY the JSON array, no other text."""
     def _parse_content_response(self, response_text: str) -> List[ContentItem]:
         """Parse the OpenRouter response into ContentItems."""
         items = []
-        
-        # Extract JSON from response
+
         try:
-            # Try to find JSON array in response
-            json_match = re.search(r'\[[\s\S]*\]', response_text)
-            if json_match:
-                raw_items = json.loads(json_match.group())
-            else:
-                return items
-        except json.JSONDecodeError:
+            parsed = extract_json_from_response(response_text)
+        except Exception:
             return items
-        
+
+        if isinstance(parsed, dict):
+            raw_items = parsed.get("items") or parsed.get("results") or parsed.get("content") or []
+        else:
+            raw_items = parsed
+
+        if not isinstance(raw_items, list):
+            return items
+
         for raw in raw_items:
+            if not isinstance(raw, dict):
+                continue
             try:
-                content_type = ContentType(raw.get("type", "video"))
-                source_type = SourceType(raw.get("source", "web"))
-                
+                raw_type = str(raw.get("type") or raw.get("content_type") or "video").strip().lower().replace("-", "_")
+                raw_source = str(raw.get("source") or raw.get("source_type") or "web").strip().lower().replace("-", "_")
+                if raw_source in {"yt", "youtube_video"}:
+                    raw_source = "youtube"
+                if raw_source in {"khan", "khanacademy"}:
+                    raw_source = "khan_academy"
+                if raw_source in {"mit", "mit_ocw_video"}:
+                    raw_source = "mit_ocw"
+
+                content_type = ContentType(raw_type)
+                source_type = SourceType(raw_source)
+
                 # Build embed URL based on source
-                video_id_or_url = raw.get("video_id_or_url", "")
+                video_id_or_url = (
+                    raw.get("video_id_or_url")
+                    or raw.get("video_id")
+                    or raw.get("embed_url")
+                    or raw.get("url")
+                    or raw.get("link")
+                    or ""
+                )
                 embed_url = self._build_embed_url(source_type, video_id_or_url)
-                
+
                 if embed_url:
                     items.append(ContentItem(
                         content_type=content_type,
@@ -265,7 +261,7 @@ Return ONLY the JSON array, no other text."""
                         duration_minutes=raw.get("duration_minutes"),
                         description=raw.get("description")
                     ))
-            except (ValueError, KeyError):
+            except (ValueError, KeyError, TypeError):
                 continue
         
         return items
@@ -276,21 +272,9 @@ Return ONLY the JSON array, no other text."""
             return None
         
         if source_type == SourceType.YOUTUBE:
-            # Extract video ID if full URL provided
-            video_id = video_id_or_url
-            if "youtube.com" in video_id_or_url or "youtu.be" in video_id_or_url:
-                # Extract ID from various YouTube URL formats
-                patterns = [
-                    r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})',
-                ]
-                for pattern in patterns:
-                    match = re.search(pattern, video_id_or_url)
-                    if match:
-                        video_id = match.group(1)
-                        break
-            
+            video_id = self._extract_youtube_id(video_id_or_url)
             # Validate video ID format (11 characters, alphanumeric with - and _)
-            if re.match(r'^[a-zA-Z0-9_-]{11}$', video_id):
+            if video_id and re.match(r'^[a-zA-Z0-9_-]{11}$', video_id):
                 return f"https://www.youtube-nocookie.com/embed/{video_id}"
             return None
         
@@ -310,6 +294,35 @@ Return ONLY the JSON array, no other text."""
         
         else:
             return video_id_or_url
+
+    def _extract_youtube_id(self, value: str) -> Optional[str]:
+        """Extract a YouTube video ID from common URL shapes or an ID."""
+        value = (value or "").strip()
+        if re.match(r'^[a-zA-Z0-9_-]{11}$', value):
+            return value
+
+        try:
+            parsed = urlparse(value)
+        except Exception:
+            return None
+
+        host = parsed.netloc.lower()
+        path = parsed.path.strip("/")
+        if host.endswith("youtu.be") and path:
+            return path.split("/")[0]
+        if "youtube" in host:
+            query_id = parse_qs(parsed.query).get("v", [None])[0]
+            if query_id:
+                return query_id
+            parts = path.split("/")
+            for marker in ("embed", "shorts", "live"):
+                if marker in parts:
+                    idx = parts.index(marker)
+                    if idx + 1 < len(parts):
+                        return parts[idx + 1]
+
+        match = re.search(r"(?:v=|youtu\.be/|embed/|shorts/)([a-zA-Z0-9_-]{11})", value)
+        return match.group(1) if match else None
     
     async def search_youtube(self, topic: str, max_results: int = 3) -> List[ContentItem]:
         """Search YouTube for educational videos using the YouTube Data API v3, with fallback to a known library."""
@@ -344,7 +357,7 @@ Return ONLY the JSON array, no other text."""
             search_url = "https://www.googleapis.com/youtube/v3/search"
             params = {
                 "part": "snippet",
-                "q": topic,
+                "q": f"{topic} tutorial lecture",
                 "type": "video",
                 "maxResults": min(max_results * 3, 25),
                 "safeSearch": "moderate",
@@ -401,12 +414,20 @@ Return ONLY the JSON array, no other text."""
 
             results = []
             ranked = []
+            non_english_markers = (
+                " in hindi", "hindi", "urdu", "telugu", "tamil", "bengali",
+                "marathi", "हिंदी", "हिन्दी"
+            )
             for item in items:
                 vid = item.get("id", {}).get("videoId")
                 if not vid:
                     continue
 
                 details = details_by_id.get(vid, {})
+                title_lower = (details.get("title") or "").lower()
+                if any(marker in title_lower for marker in non_english_markers):
+                    continue
+
                 duration = _parse_iso8601_duration(details.get("duration", ""))
                 # Skip shorts or very short videos (< 2:30)
                 if duration and duration < 150:
@@ -521,56 +542,57 @@ Return ONLY the JSON array, no other text."""
         return items
     
     async def generate_problem(self, topic: str, difficulty: str = "medium") -> Optional[ContentItem]:
-        """Generate a practice problem for a topic using LLM."""
-        prompt = f"""Create a practice problem for the topic: "{topic}"
+        """Find a real sourced practice problem for a topic using provider search."""
+        prompt = f"""Find one real online practice problem for the topic: "{topic}"
 Difficulty: {difficulty}
 
 The problem should:
 1. Test understanding of core concepts
 2. Be solvable in 5-10 minutes
 3. Have a clear, verifiable answer
+4. Come from a real educational source page
 
 Return JSON:
 {{
   "problem": "The problem statement",
   "hints": ["Hint 1", "Hint 2"],
   "solution": "Step-by-step solution",
-  "answer": "Final answer"
+  "answer": "Final answer",
+  "source": "Short source label",
+  "source_url": "https://..."
 }}"""
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.openrouter_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": "openai/gpt-4o-mini",  # Non-browsing model for generation
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.7,
-                        "max_tokens": 1500
-                    },
-                    timeout=30.0
+            problem_data = await generate_json(
+                prompt,
+                task="practice_problem_search",
+                use_search=True,
+                max_tokens=1500,
+                temperature=0.2,
+                search_prompt=(
+                    f"Search for an actual practice problem about {topic}. "
+                    "Prefer reputable educational sources such as Paul's Math Notes, MIT OCW, AoPS, "
+                    "Khan Academy, OpenStax, and LibreTexts. Avoid Chegg, CourseHero, Quizlet, "
+                    "Bartleby, Slader, Brainly, Studocu, Pinterest, and Reddit."
                 )
-                response.raise_for_status()
-                data = response.json()
-            
-            content = data["choices"][0]["message"]["content"]
-            json_match = re.search(r'\{[\s\S]*\}', content)
-            if json_match:
-                problem_data = json.loads(json_match.group())
-                # Store problem data as JSON in embed_url (will be parsed by frontend)
-                return ContentItem(
-                    content_type=ContentType.PROBLEM,
-                    source_type=SourceType.WEB,
-                    title=f"Practice: {topic}",
-                    embed_url=f"data:application/json,{json.dumps(problem_data)}",
-                    duration_minutes=10,
-                    description=problem_data.get("problem", "")[:200]
-                )
+            )
+            source_url = (problem_data.get("source_url") or "").strip()
+            problem_statement = (problem_data.get("problem") or "").strip()
+            if not source_url.startswith(("http://", "https://")) or len(problem_statement) < 20:
+                return None
+
+            # Store problem data as JSON in embed_url (will be parsed by frontend)
+            source = problem_data.get("source") or "Educational source"
+            return ContentItem(
+                content_type=ContentType.PROBLEM,
+                source_type=SourceType.WEB,
+                title=f"Practice from {source}: {topic}",
+                embed_url=f"data:application/json,{json.dumps(problem_data)}",
+                duration_minutes=10,
+                source_title=source,
+                description=problem_statement[:200]
+            )
         except Exception as e:
-            print(f"[ContentAggregator] Problem generation failed: {e}")
+            print(f"[ContentAggregator] Problem search failed: {e}")
         
         return None

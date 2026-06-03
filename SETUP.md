@@ -29,8 +29,17 @@ Create `backend/.env`:
 VITE_SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
-# Gemini AI
+# LLM provider (Claude-first)
+ANTHROPIC_API_KEY=your-anthropic-api-key
+LLM_PROVIDER=auto
+CLAUDE_MODEL=claude-sonnet-4-6
+CLAUDE_SEARCH_ENABLED=true
+PROBLEM_SEARCH_PROVIDER=openrouter
+PROBLEM_PREFETCH_TOPICS=1
+
+# Optional fallbacks
 GEMINI_API_KEY=your-gemini-api-key
+OPENROUTER_API_KEY=your-openrouter-api-key
 ```
 
 **Where to get these:**
@@ -39,7 +48,16 @@ GEMINI_API_KEY=your-gemini-api-key
 |----------|----------|
 | `VITE_SUPABASE_URL` | Supabase Dashboard → Settings → API → Project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Dashboard → Settings → API → `service_role` key (secret!) |
-| `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) |
+| `ANTHROPIC_API_KEY` | Anthropic Console → API keys |
+| `LLM_PROVIDER` | Use `auto` for Claude-first fallback behavior |
+| `CLAUDE_MODEL` | Default: `claude-sonnet-4-6` |
+| `CLAUDE_SEARCH_ENABLED` | `true` when Anthropic web search is enabled in Console |
+| `PROBLEM_SEARCH_PROVIDER` | Use `openrouter` for real sourced practice problems; `auto`/`claude` can use Claude search |
+| `PROBLEM_PREFETCH_TOPICS` | Default `1` keeps problem search focused on the active topic |
+| `GEMINI_API_KEY` | Optional fallback from [Google AI Studio](https://aistudio.google.com/apikey) |
+| `OPENROUTER_API_KEY` | Optional fallback from OpenRouter |
+
+Optional knobs: `LLM_FALLBACK_ENABLED=false` disables fallbacks, `CLAUDE_SEARCH_MAX_USES=3` controls Claude web-search calls, `LESSON_CONTENT_TIMEOUT_SECONDS=120` controls the endpoint's max wait for lesson pieces, and `OPENROUTER_SEARCH_MODEL` / `GEMINI_MODEL` override fallback models.
 
 ⚠️ **Important:** Use the `service_role` key, NOT the `anon` key for the backend.
 

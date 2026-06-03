@@ -5,12 +5,10 @@ Google Drive integration service with Claude-powered document selection.
 import httpx
 import json
 import re
-import os
 from typing import List, Optional
 from datetime import datetime
 
-
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+from services.llm_provider import generate_text, has_provider
 
 
 def extract_json_from_response(text: str) -> dict:
@@ -34,42 +32,17 @@ def extract_json_from_response(text: str) -> dict:
 
 
 async def call_claude(prompt: str, system: str = "") -> str:
-    """Call Claude API via REST (Anthropic API)."""
-    if not ANTHROPIC_API_KEY:
-        print("[GoogleDrive] WARNING: ANTHROPIC_API_KEY not configured, using fallback")
-        # Return a minimal fallback response for testing
+    """Compatibility wrapper around the shared Claude-first provider."""
+    if not has_provider():
+        print("[GoogleDrive] WARNING: no LLM provider configured, using fallback")
         return '{"selected_documents": [], "search_terms": []}'
-
-    url = "https://api.anthropic.com/v1/messages"
-    headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
-    }
-
-    payload = {
-        "model": "claude-sonnet-4-20250514",
-        "max_tokens": 4096,
-        "messages": [{"role": "user", "content": prompt}]
-    }
-
-    if system:
-        payload["system"] = system
-
     try:
-        async with httpx.AsyncClient() as client:
-            print(f"[GoogleDrive] Calling Claude API...")
-            response = await client.post(url, headers=headers, json=payload, timeout=60.0)
-            response.raise_for_status()
-            data = response.json()
-            result = data["content"][0]["text"]
-            print(f"[GoogleDrive] Claude API response received ({len(result)} chars)")
-            return result
-    except httpx.HTTPStatusError as e:
-        print(f"[GoogleDrive] Claude API HTTP error: {e.response.status_code} - {e.response.text}")
-        raise
+        print(f"[GoogleDrive] Calling LLM provider...")
+        result = await generate_text(prompt, system=system, task="google_drive", max_tokens=4096)
+        print(f"[GoogleDrive] LLM provider response received ({len(result)} chars)")
+        return result
     except Exception as e:
-        print(f"[GoogleDrive] Claude API error: {e}")
+        print(f"[GoogleDrive] LLM provider error: {e}")
         raise
 
 
@@ -231,11 +204,11 @@ async def comprehensive_document_search(
     Falls back to simple keyword search if Claude API is not configured.
     """
     print(f"[GoogleDrive] Starting comprehensive search for topic: {central_topic}")
-    print(f"[GoogleDrive] ANTHROPIC_API_KEY configured: {bool(ANTHROPIC_API_KEY)}")
+    print(f"[GoogleDrive] LLM provider configured: {has_provider()}")
 
     # Step 1: Generate search terms - use Claude if available, otherwise simple keywords
     search_terms = []
-    if ANTHROPIC_API_KEY:
+    if has_provider():
         try:
             search_terms = await generate_search_terms_for_topic(central_topic, existing_nodes)
             print(f"[GoogleDrive] Generated {len(search_terms)} search terms via Claude: {search_terms[:5]}")
@@ -281,7 +254,7 @@ async def comprehensive_document_search(
         return [], search_terms
 
     # Try Claude selection if API key is configured
-    if ANTHROPIC_API_KEY:
+    if has_provider():
         try:
             selected_docs, additional_terms = await use_claude_to_select_relevant_docs(
                 central_topic, unique_docs, existing_nodes

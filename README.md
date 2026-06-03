@@ -10,6 +10,13 @@ Create `backend/.env`:
 ```env
 VITE_SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+ANTHROPIC_API_KEY=your-anthropic-key
+LLM_PROVIDER=auto
+CLAUDE_MODEL=claude-sonnet-4-6
+CLAUDE_SEARCH_ENABLED=true
+PROBLEM_SEARCH_PROVIDER=openrouter
+PROBLEM_PREFETCH_TOPICS=1
+# Optional fallbacks
 OPENROUTER_API_KEY=your-openrouter-key
 GEMINI_API_KEY=your-gemini-key
 TOKEN_COMPANY_API_KEY=your-token-company-key
@@ -47,11 +54,12 @@ npm install
 cd backend
 source .venv/bin/activate
 python3 main.py
-[OLD] uvicorn main:app --reload --port 8000
+.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8001
+
 
 # Terminal 2
 cd frontend
-npm run dev
+VITE_API_URL=http://localhost:8001 npm run dev -- --host 127.0.0.1 --port 3001
 ```
 
-Frontend runs at `http://localhost:3000`, backend at `http://localhost:8000`.
+Frontend runs at `http://127.0.0.1:3001`, backend at `http://localhost:8001`.

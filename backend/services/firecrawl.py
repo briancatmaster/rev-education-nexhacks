@@ -14,6 +14,7 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 
 from .token_compression import TokenCompressionService, CompressionResult
+from .llm_provider import generate_json
 
 
 class ChapterOutline(BaseModel):
@@ -261,9 +262,7 @@ class FirecrawlService:
         markdown: str,
         api_key: str
     ) -> List[ChapterOutline]:
-        """Use Gemini to extract structured chapter data from markdown."""
-        import json
-        import re
+        """Use the configured LLM provider to extract structured chapter data."""
 
         # Truncate if too long
         max_chars = 30000
@@ -293,35 +292,15 @@ Rules:
 - If no clear numbering, leave chapter_number as null
 - Return valid JSON only, no markdown or explanation"""
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                json={"contents": [{"parts": [{"text": prompt}]}]},
-                timeout=30.0
-            )
-            response.raise_for_status()
-            data = response.json()
-
-        # Extract text from Gemini response
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
-
-        # Parse JSON from response
-        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
-        if json_match:
-            text = json_match.group(1)
-
-        text = text.strip()
         try:
-            result = json.loads(text)
-        except json.JSONDecodeError:
-            start = text.find('{')
-            end = text.rfind('}') + 1
-            if start != -1 and end > start:
-                result = json.loads(text[start:end])
-            else:
-                return []
+            result = await generate_json(
+                prompt,
+                task="chapter_outline_extraction",
+                max_tokens=4096,
+                temperature=0.2
+            )
+        except Exception:
+            return []
 
         chapters = []
         for item in result.get("chapters", []):

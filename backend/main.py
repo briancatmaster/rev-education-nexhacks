@@ -25,7 +25,6 @@ load_dotenv(env_path)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 TOKEN_COMPANY_API_KEY = os.getenv("TOKEN_COMPANY_API_KEY", "")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 DEMO_RUN_ID = str(uuid.uuid4())
 PROBLEM_BATCH_SIZE = int(os.getenv("PROBLEM_BATCH_SIZE", "3"))
@@ -43,9 +42,9 @@ supabase: Client = create_client(
     os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 )
 
-
 # Import Firecrawl service for chapter extraction
 from services.firecrawl import FirecrawlService, FirecrawlResponse, ChapterOutline
+from services.llm_provider import generate_json, generate_text
 
 # Import PDF processor and token compression for immediate paper processing
 from services.pdf_processor import PDFProcessor
@@ -198,7 +197,25 @@ def extract_json_from_response(text: str) -> dict:
 
 
 async def _compress_prompt_text(text: str) -> tuple[str, bool]:
-    return text, False
+    """Compress large user/content context before placing it inside LLM prompts."""
+    if not TOKEN_COMPANY_API_KEY or not text or len(text) < 1200:
+        return text, False
+
+    try:
+        compression_service = TokenCompressionService(TOKEN_COMPANY_API_KEY)
+        result = await compression_service.compress_for_notes(text)
+    except Exception as e:
+        print(f"[PromptCompression] Compression failed: {e}")
+        return text, False
+
+    if not result.success or not result.compressed_text or result.compression_ratio >= 0.95:
+        return text, False
+
+    print(
+        f"[PromptCompression] Compressed {result.original_tokens} -> "
+        f"{result.compressed_tokens} tokens ({result.compression_ratio:.2%})"
+    )
+    return result.compressed_text, True
 
 
 def _is_generic_or_doc_label(label: str) -> bool:
@@ -244,15 +261,8 @@ def _filter_generated_nodes(nodes: List[dict]) -> List[dict]:
 
 
 async def call_gemini(prompt: str) -> str:
-    """Call Gemini API via REST."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json={
-            "contents": [{"parts": [{"text": prompt}]}]
-        }, timeout=30.0)
-        response.raise_for_status()
-        data = response.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+    """Compatibility wrapper: route legacy Gemini calls through the configured LLM provider."""
+    return await generate_text(prompt, task="legacy_gemini", max_tokens=8192)
 
 
 async def generate_background_nodes(central_topic: str, background: str) -> List[dict]:
@@ -736,6 +746,7 @@ async def upload_paper_file(
         compressed_tokens = 0
         compression_ratio = 1.0
         compressed_text = ""
+        compression_success = False
 
         try:
             extracted_text = await pdf_processor.extract_text_only(file_bytes)
@@ -749,6 +760,7 @@ async def upload_paper_file(
                     compressed_text = compression_result.compressed_text
                     compressed_tokens = compression_result.compressed_tokens
                     compression_ratio = compression_result.compression_ratio
+                    compression_success = True
                     print(f"[Paper Upload] Compressed {original_tokens} -> {compressed_tokens} tokens ({compression_ratio:.2%})")
                 else:
                     # Fallback to original on compression failure
@@ -787,9 +799,9 @@ async def upload_paper_file(
             "original_token_count": original_tokens,
             "compressed_token_count": compressed_tokens,
             "compression_ratio": compression_ratio,
-            "compression_aggressiveness": 0.4,  # Academic preset
-            "ttc_processed": True if compressed_text else False,
-            "ttc_processed_at": datetime.utcnow().isoformat() if compressed_text else None,
+            "compression_aggressiveness": 0.5,  # Academic preset
+            "ttc_processed": compression_success,
+            "ttc_processed_at": datetime.utcnow().isoformat() if compression_success else None,
             "pdf_extraction_method": "pymupdf",
             "is_processed": True
         }).execute()
@@ -856,6 +868,7 @@ async def submit_google_docs(request: GoogleDocsRequest):
             original_tokens = 0
             compressed_tokens = 0
             compression_ratio = 1.0
+            compression_success = False
 
             # Fetch document content if access token provided
             if request.access_token:
@@ -915,6 +928,7 @@ async def submit_google_docs(request: GoogleDocsRequest):
                         original_tokens = compression_result.original_tokens
                         compressed_tokens = compression_result.compressed_tokens
                         compression_ratio = compression_result.compression_ratio
+                        compression_success = True
                     else:
                         compressed_content = doc_content
                         original_tokens = compression_service._estimate_tokens(doc_content)
@@ -968,17 +982,34 @@ async def submit_google_docs(request: GoogleDocsRequest):
                     "mime_type": doc.mimeType,
                     "relevance_score": doc.relevanceScore,
                     "is_selected": True,
+                    "content_snippet": (compressed_content or doc_content)[:4000],
+                    "compressed_storage_bucket": "compressed_documents" if storage_path else None,
                     "compressed_storage_path": storage_path,
                     "original_tokens": original_tokens,
                     "compressed_tokens": compressed_tokens,
                     "compression_ratio": compression_ratio,
+                    "ttc_processed": compression_success,
                     "is_processed": bool(compressed_content)
                 }, on_conflict="session_id,google_doc_id").execute()
             except Exception as e:
                 print(f"[GoogleDocs] Failed to store doc metadata: {e}")
+                try:
+                    supabase.table("google_docs_materials").upsert({
+                        "session_id": request.session_id,
+                        "user_id": request.user_id,
+                        "google_doc_id": doc.id,
+                        "title": doc.title,
+                        "url": doc.url,
+                        "mime_type": doc.mimeType,
+                        "relevance_score": doc.relevanceScore,
+                        "is_selected": True,
+                        "content_snippet": (compressed_content or doc_content)[:4000],
+                    }, on_conflict="session_id,google_doc_id").execute()
+                except Exception as fallback_err:
+                    print(f"[GoogleDocs] Failed fallback metadata store: {fallback_err}")
 
             if doc_content:
-                doc_contents.append({"title": doc.title, "content": doc_content[:2000]})  # Preview for node generation
+                doc_contents.append({"title": doc.title, "content": (compressed_content or doc_content)[:2000]})  # Preview for node generation
 
         # Generate nodes from document titles AND content using Gemini
         titles_formatted = "\n".join([f"{i+1}. {t}" for i, t in enumerate(doc_titles)])
@@ -1596,6 +1627,7 @@ async def submit_papers_authored(
             original_tokens = pdf_processor.estimate_tokens(extraction.text)
             compressed_tokens = original_tokens
             compression_ratio = 1.0
+            compression_success = False
 
             if compression_service and extraction.text:
                 compression_result = await compression_service.compress_for_academic_paper(extraction.text)
@@ -1604,6 +1636,7 @@ async def submit_papers_authored(
                     original_tokens = compression_result.original_tokens
                     compressed_tokens = compression_result.compressed_tokens
                     compression_ratio = compression_result.compression_ratio
+                    compression_success = True
 
             # Upload PDF to storage
             storage_path = f"{user_id}/{session_id}/authored/{file.filename}"
@@ -1681,7 +1714,8 @@ async def submit_papers_authored(
                 "file_name": file.filename,
                 "file_size_bytes": len(pdf_bytes),
                 "is_processed": True,
-                "ttc_processed": True if compression_service else False,
+                "ttc_processed": compression_success,
+                "ttc_processed_at": datetime.utcnow().isoformat() if compression_success else None,
                 "original_token_count": original_tokens,
                 "compressed_token_count": compressed_tokens,
                 "compression_ratio": compression_ratio,
@@ -1861,6 +1895,7 @@ async def submit_coursework_transcript(
         original_tokens = pdf_processor.estimate_tokens(text) if text else 0
         compressed_tokens = original_tokens
         compression_ratio = 1.0
+        compression_success = False
 
         if compression_service and text:
             try:
@@ -1870,6 +1905,7 @@ async def submit_coursework_transcript(
                     original_tokens = compression_result.original_tokens
                     compressed_tokens = compression_result.compressed_tokens
                     compression_ratio = compression_result.compression_ratio
+                    compression_success = True
             except Exception as comp_err:
                 print(f"[Transcript] Compression failed: {comp_err}")
 
@@ -1928,9 +1964,11 @@ async def submit_coursework_transcript(
             "compressed_storage_bucket": "compressed_documents",
             "compressed_storage_path": compressed_storage_path,
             "file_name": file.filename,
-            "original_tokens": original_tokens,
-            "compressed_tokens": compressed_tokens,
+            "original_token_count": original_tokens,
+            "compressed_token_count": compressed_tokens,
             "compression_ratio": compression_ratio,
+            "ttc_processed": compression_success,
+            "ttc_processed_at": datetime.utcnow().isoformat() if compression_success else None,
             "is_processed": True
         }).execute()
 
@@ -3038,27 +3076,296 @@ About 600-1000 words. Start directly with the content - no code fences."""
     return response
 
 
-async def scrape_math_problems_from_sources(topic: str, num_problems: int = 3) -> List[dict]:
-    """
-    Use OpenRouter's browse model to find math problems from educational sources.
-    Top Sources Include: Paul's Math Notes, MIT OCW, AoPS, Khan Academy
-    """
+async def _generate_problem_search_text(
+    prompt: str,
+    *,
+    task: str,
+    max_tokens: int,
+    temperature: float,
+    search_prompt: str
+) -> str:
+    """Search for sourced problems with a fast fallback to the original online model."""
+    provider = os.getenv(
+        "PROBLEM_SEARCH_PROVIDER",
+        "openrouter" if OPENROUTER_API_KEY else "auto"
+    ).strip().lower()
+
+    if provider == "openrouter" and OPENROUTER_API_KEY:
+        return await _call_openrouter_problem_search(
+            prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            search_prompt=search_prompt
+        )
+
+    timeout_seconds = float(os.getenv("PROBLEM_SEARCH_TIMEOUT_SECONDS", "45"))
+    try:
+        return await asyncio.wait_for(
+            generate_text(
+                prompt,
+                task=task,
+                use_search=True,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                search_prompt=search_prompt
+            ),
+            timeout=timeout_seconds
+        )
+    except Exception as e:
+        if OPENROUTER_API_KEY and provider in {"auto", "claude", ""}:
+            print(f"[LessonContent] {task} provider search failed/timed out, falling back to OpenRouter: {e}")
+            return await _call_openrouter_problem_search(
+                prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                search_prompt=search_prompt
+            )
+        raise
+
+
+async def _call_openrouter_problem_search(
+    prompt: str,
+    *,
+    max_tokens: int,
+    temperature: float,
+    search_prompt: str
+) -> str:
     if not OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY not configured for problem search fallback")
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": os.getenv("LLM_HTTP_REFERER", "https://arxlearn.app"),
+                "X-Title": os.getenv("LLM_APP_TITLE", "arXlearn")
+            },
+            json={
+                "model": os.getenv("OPENROUTER_SEARCH_MODEL", "openai/gpt-4o-mini:online"),
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "plugins": [{
+                    "id": "web",
+                    "max_results": int(os.getenv("OPENROUTER_SEARCH_MAX_RESULTS", "3")),
+                    "search_prompt": search_prompt
+                }]
+            },
+            timeout=float(os.getenv("OPENROUTER_PROBLEM_TIMEOUT_SECONDS", "70"))
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+
+
+async def _parse_problem_search_response(content: str, *, task: str, max_tokens: int) -> List[dict]:
+    try:
+        from services.llm_provider import extract_json_from_response as _extract_provider_json
+        parsed = _extract_provider_json(content)
+    except Exception:
+        parsed = await generate_json(
+            f"""Repair this intended JSON array of sourced practice problems.
+Return ONLY the JSON array. Keep only complete visible problem records and do not invent new problems.
+
+{content[:24000]}""",
+            task=f"{task}_repair",
+            max_tokens=max(4096, max_tokens),
+            temperature=0.0,
+        )
+
+    if isinstance(parsed, dict):
+        parsed = parsed.get("problems") or parsed.get("items") or parsed.get("results") or []
+
+    if not isinstance(parsed, list):
         return []
 
+    return [p for p in parsed if isinstance(p, dict)]
+
+
+async def _source_url_is_reachable(source_url: str) -> bool:
+    if not source_url.startswith(("http://", "https://")):
+        return False
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            try:
+                response = await client.head(source_url, timeout=8.0)
+            except Exception:
+                response = await client.get(source_url, timeout=12.0)
+            return response.status_code < 400
+    except Exception as e:
+        print(f"[LessonContent] Problem source URL failed validation: {source_url} ({e})")
+        return False
+
+
+async def _filter_reachable_sourced_problems(problems: List[dict]) -> List[dict]:
+    filtered = _filter_sourced_problems(problems)
+    if not filtered:
+        return []
+
+    checks = await asyncio.gather(
+        *[_source_url_is_reachable(p.get("source_url", "")) for p in filtered],
+        return_exceptions=True
+    )
+    reachable = []
+    for problem, ok in zip(filtered, checks):
+        if ok is True:
+            reachable.append(problem)
+        else:
+            print(f"[LessonContent] Dropped unreachable problem source: {problem.get('source_url', '')}")
+    return reachable
+
+
+async def _search_exercise_problem_fallback(topic: str, num_problems: int) -> List[dict]:
+    prompt = f"""Find real online exercises, homework questions, lab tasks, notebook tasks, or assignment prompts for: "{topic}".
+
+Prioritize sources that explicitly contain exercises/labs/problem sets:
+- university deep learning, machine learning, science, math, or research-methods courses
+- official tutorial notebooks
+- course assignments and homework PDFs
+- reputable educational repositories or notebooks
+- for diffusion/DDPM topics, especially look for public course assignments such as UIUC CS 444 Assignment 5,
+  KAIST Diffusion-Assignment1-DDPM, Berkeley CS182 diffusion homework, NTHU diffusion labs, UPenn diffusion labs,
+  Hugging Face annotated diffusion notebooks, and labml.ai DDPM notebooks
+
+Return JSON only:
+[
+  {{
+    "problem": "The actual exercise/lab/assignment prompt, quoted or faithfully extracted from the source",
+    "hints": ["Hint 1", "Hint 2"],
+    "solution": "A concise solution or solution outline",
+    "answer": "Final answer or expected result",
+    "source": "Source label",
+    "source_url": "https://...",
+    "difficulty": "easy/medium/hard"
+  }}
+]
+
+Rules:
+- Every item must have a real source_url.
+- Prefer source pages that contain the exercise/lab/assignment, not just background reading.
+- Do not use Chegg, CourseHero, Quizlet, Brainly, Studocu, Reddit, or answer farms.
+- If exact topic exercises are scarce, use closely related exercises that practice the prerequisite concepts.
+- Return up to {num_problems} items."""
+
+    search_prompt = (
+        f"Search for real exercises assignments homework labs notebooks problem sets about {topic}. "
+        "Prefer university courses, official tutorial notebooks, educational repositories, PDFs, and course pages. "
+        "For diffusion/DDPM/generative model topics try queries like: CS 444 Assignment 5 Diffusion Models, "
+        "KAIST Diffusion-Assignment1-DDPM, Berkeley CS182 diffusion homework, NTHU Lab 13 Diffusion Models, "
+        "UPenn lab diffusion models, Hugging Face annotated diffusion notebook, labml DDPM notebook. "
+        "Avoid answer farms."
+    )
+    content = await _generate_problem_search_text(
+        prompt,
+        task="exercise_problem_fallback",
+        max_tokens=max(6500, num_problems * 2200),
+        temperature=0.25,
+        search_prompt=search_prompt
+    )
+    problems = await _parse_problem_search_response(
+        content,
+        task="exercise_problem_fallback",
+        max_tokens=max(4096, num_problems * 2200)
+    )
+    problems = await _filter_reachable_sourced_problems(problems)
+    if len(problems) < num_problems:
+        seen_urls = {p.get("source_url") for p in problems}
+        for problem in _curated_source_problem_fallback(topic):
+            if problem.get("source_url") not in seen_urls:
+                problems.append(problem)
+                seen_urls.add(problem.get("source_url"))
+            if len(problems) >= num_problems:
+                break
+    return problems
+
+
+def _curated_source_problem_fallback(topic: str) -> List[dict]:
+    """Small source-backed safety net for sparse advanced topics."""
+    topic_lower = topic.lower()
+    if not any(term in topic_lower for term in ["diffusion", "ddpm", "denoising", "generative model"]):
+        return []
+
+    return [
+        {
+            "problem": (
+                "Train a time-conditioned UNet denoiser for a DDPM on MNIST. Implement the noising process "
+                "$x_t = \\sqrt{\\bar\\alpha_t}x_0 + \\sqrt{1-\\bar\\alpha_t}\\epsilon$, condition the UNet on "
+                "the normalized timestep $t/T$, and train it to predict the added noise."
+            ),
+            "hints": [
+                "Use a beta schedule to compute cumulative products $\\bar\\alpha_t$.",
+                "The model target is the sampled noise $\\epsilon$, not the clean image."
+            ],
+            "solution": (
+                "Build the beta/alpha schedule, sample a timestep and noise for each batch, create $x_t$, "
+                "feed $x_t$ and normalized $t$ into the UNet, and minimize MSE between predicted and true noise."
+            ),
+            "answer": "A trained timestep-conditioned UNet that predicts noise for DDPM denoising.",
+            "source": "UIUC CS 444 Assignment 5",
+            "source_url": "https://slazebni.cs.illinois.edu/spring25/assignment5.html",
+            "difficulty": "hard",
+        },
+        {
+            "problem": (
+                "Implement a Denoising Diffusion Probabilistic Model assignment from scratch, including the "
+                "forward diffusion process, reverse denoising model, and sampling procedure."
+            ),
+            "hints": [
+                "Start from the DDPM forward process and implement the tutorial notebook pieces in order.",
+                "Use a neural network to predict noise at each timestep."
+            ],
+            "solution": (
+                "Implement the forward noise schedule, train the denoising network on noisy samples and timesteps, "
+                "then iteratively sample by applying the learned reverse process."
+            ),
+            "answer": "A working DDPM implementation that can generate samples through iterative denoising.",
+            "source": "KAIST Diffusion Assignment 1",
+            "source_url": "https://github.com/KAIST-Visual-AI-Group/Diffusion-Assignment1-DDPM",
+            "difficulty": "hard",
+        },
+        {
+            "problem": (
+                "For a diffusion model lab, study the bottleneck created by the DDPM forward-process length $T$. "
+                "Explain how increasing or decreasing $T$ changes training/sampling cost and sample quality."
+            ),
+            "hints": [
+                "Think about how many denoising steps sampling requires.",
+                "Relate $T$ to the granularity of the noise schedule."
+            ],
+            "solution": (
+                "Larger $T$ gives a smoother denoising chain and can improve quality, but it increases sampling "
+                "cost because the reverse process runs for more steps. Smaller $T$ samples faster but may make "
+                "each denoising step harder and reduce quality."
+            ),
+            "answer": "A larger $T$ usually improves denoising granularity at the cost of slower sampling; a smaller $T$ trades quality for speed.",
+            "source": "NTHU Lab 13 Diffusion Models",
+            "source_url": "https://nthu-datalab.github.io/ml/labs/13-3_Diffusion/Lab_13_Diffusion%20Models.pdf",
+            "difficulty": "medium",
+        },
+    ]
+
+
+async def scrape_math_problems_from_sources(topic: str, num_problems: int = 3) -> List[dict]:
+    """
+    Use the configured LLM/search provider to find sourced practice problems.
+    Works across math, ML, CS, science, and research-adjacent topics.
+    """
     prompt = f"""Find practice problems for the topic: "{topic}"
 
-If relevant to the topic at hand, search these educational sources:
-1. Paul's Math Notes (tutorial.math.lamar.edu)
-2. MIT OpenCourseWare (ocw.mit.edu)
-3. Art of Problem Solving (artofproblemsolving.com)
-4. Khan Academy (khanacademy.org)
+Search reputable educational sources that match the topic. Prefer:
+1. University course materials and lecture notes (MIT OCW, Stanford CS229, CMU, Berkeley, Cornell, Harvard)
+2. Official library/framework docs with exercises or examples (scikit-learn, PyTorch, TensorFlow, NumPy/SciPy)
+3. Open textbooks and learning sites (OpenStax, LibreTexts, Khan Academy, Paul's Math Notes)
+4. High-quality educational explainers with concrete exercises (StatQuest, AoPS where relevant)
 
-**OTHERWISE:** You decide which websites are best to search for problems to teach the user
-and give them practice so they can get closer to topic mastery.
+Choose sources that actually fit the topic; do not force math-only sources for machine learning,
+computer science, statistics, or research-methods topics.
 
 For each problem found, extract:
-- The complete problem statement (include any LaTeX math notation)
+- The complete problem statement or exercise prompt (include any LaTeX/math notation)
 - Hints if available
 - The solution or answer
 - The source URL
@@ -3079,50 +3386,37 @@ For each problem found, extract:
 IMPORTANT:
 - Preserve all mathematical notation in LaTeX format
 - Include complete problem statements
-- If you can't find actual problems, generate realistic ones in the style of these sources
+- Use ONLY problems that come from a real online source
+- Every problem MUST include a valid source_url where the problem can be found
+- If you cannot find enough real sourced problems, return fewer problems or an empty array
+- Do NOT invent or generate new problems
 - Return ONLY the JSON array"""
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://arxlearn.app",
-                    "X-Title": "arXlearn"
-                },
-                json={
-                    "model": "openai/gpt-4o-mini:online",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3,
-                    "max_tokens": 2200,
-                    # Enable web search plugin for real results from educational sites
-                    "plugins": [
-                        {
-                            "id": "web",
-                            "max_results": 3,
-                            "search_prompt": (
-                                f"Search for practice problems about {topic}. "
-                                "Prefer: tutorial.math.lamar.edu, ocw.mit.edu, artofproblemsolving.com, "
-                                "khanacademy.org, openstax.org, math.libretexts.org, libretexts.org. "
-                                "Avoid: chegg.com, coursehero.com, quizlet.com, bartleby.com, slader.com, "
-                                "brainly.com, studocu.com, pinterest.com, reddit.com."
-                            )
-                        }
-                    ]
-                },
-                timeout=60.0
-            )
-            response.raise_for_status()
-            data = response.json()
+        search_prompt = (
+            f"Search for real practice problems or exercises about {topic}. "
+            "Prefer university course notes and reputable educational sources: ocw.mit.edu, cs229.stanford.edu, "
+            "stanford.edu, cmu.edu, berkeley.edu, cornell.edu, scikit-learn.org, pytorch.org, tensorflow.org, "
+            "statquest.org, openstax.org, libretexts.org, tutorial.math.lamar.edu, khanacademy.org. "
+            "Avoid: chegg.com, coursehero.com, quizlet.com, bartleby.com, slader.com, "
+            "brainly.com, studocu.com, pinterest.com, reddit.com."
+        )
+        content = await _generate_problem_search_text(
+            prompt,
+            task="math_problem_search",
+            max_tokens=max(5000, num_problems * 1800),
+            temperature=0.3,
+            search_prompt=search_prompt
+        )
 
-        content = data["choices"][0]["message"]["content"]
+        parsed_problems = await _parse_problem_search_response(
+            content,
+            task="math_problem_search",
+            max_tokens=max(4096, num_problems * 1800)
+        )
 
-        # Extract JSON from response
-        json_match = re.search(r'\[[\s\S]*\]', content)
-        if json_match:
-            problems = json.loads(json_match.group())
+        if isinstance(parsed_problems, list):
+            problems = parsed_problems
 
             # First pass: infer source from URL when possible
             for p in problems:
@@ -3134,7 +3428,12 @@ IMPORTANT:
 
             # Second pass: use non-search LLM to infer remaining sources
             problems = await _infer_problem_sources_with_llm(problems)
-            return problems
+            problems = await _filter_reachable_sourced_problems(problems)
+            if problems:
+                return problems[:num_problems]
+
+        print(f"[LessonContent] No strict sourced problems found for {topic}; trying exercise fallback")
+        return (await _search_exercise_problem_fallback(topic, num_problems))[:num_problems]
     except Exception as e:
         print(f"[LessonContent] Problem scraping failed: {e}")
 
@@ -3143,10 +3442,10 @@ IMPORTANT:
 
 async def scrape_math_problems_batch(topics: List[str], num_problems: int = 2) -> dict:
     """
-    Use OpenRouter's browse model to find problems for multiple topics in one call.
+    Use the configured LLM/search provider to find problems for multiple topics in one call.
     Returns a dict: { "Topic Name": [problems...] }.
     """
-    if not OPENROUTER_API_KEY or not topics:
+    if not topics:
         return {}
 
     topics_list = "\n".join([f"- {t}" for t in topics])
@@ -3154,16 +3453,17 @@ async def scrape_math_problems_batch(topics: List[str], num_problems: int = 2) -
     prompt = f"""Find practice problems for EACH of these topics:
 {topics_list}
 
-If relevant to the topic at hand, search these educational sources:
-1. Paul's Math Notes (tutorial.math.lamar.edu)
-2. MIT OpenCourseWare (ocw.mit.edu)
-3. Art of Problem Solving (artofproblemsolving.com)
-4. Khan Academy (khanacademy.org)
+Search reputable educational sources that match each topic. Prefer:
+1. University course materials and lecture notes (MIT OCW, Stanford CS229, CMU, Berkeley, Cornell, Harvard)
+2. Official library/framework docs with exercises or examples (scikit-learn, PyTorch, TensorFlow, NumPy/SciPy)
+3. Open textbooks and learning sites (OpenStax, LibreTexts, Khan Academy, Paul's Math Notes)
+4. High-quality educational explainers with concrete exercises (StatQuest, AoPS where relevant)
 
-OTHERWISE: choose the best reputable educational sources for that topic.
+Choose sources that actually fit each topic; do not force math-only sources for machine learning,
+computer science, statistics, or research-methods topics.
 
 For each topic, return {num_problems} problems. For each problem include:
-- The complete problem statement (include any LaTeX math notation)
+- The complete problem statement or exercise prompt (include any LaTeX/math notation)
 - Hints if available
 - The solution or answer
 - The source URL
@@ -3191,45 +3491,41 @@ Return JSON only in this format:
 IMPORTANT:
 - Preserve all mathematical notation in LaTeX format
 - Include complete problem statements
-- If you can't find actual problems, generate realistic ones in the style of these sources
+- Use ONLY problems that come from a real online source
+- Every problem MUST include a valid source_url where the problem can be found
+- If you cannot find enough real sourced problems for a topic, return fewer problems or an empty list for that topic
+- Do NOT invent or generate new problems
 - Return ONLY the JSON object"""
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://arxlearn.app",
-                    "X-Title": "arXlearn"
-                },
-                json={
-                    "model": "openai/gpt-4o-mini:online",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3,
-                    "max_tokens": 2200,
-                    "plugins": [
-                        {
-                            "id": "web",
-                            "max_results": 3,
-                            "search_prompt": (
-                                f"Search for practice problems about: {', '.join(topics)}. "
-                                "Prefer: tutorial.math.lamar.edu, ocw.mit.edu, artofproblemsolving.com, "
-                                "khanacademy.org, openstax.org, math.libretexts.org, libretexts.org. "
-                                "Avoid: chegg.com, coursehero.com, quizlet.com, bartleby.com, slader.com, "
-                                "brainly.com, studocu.com, pinterest.com, reddit.com."
-                            )
-                        }
-                    ]
-                },
-                timeout=60.0
-            )
-            response.raise_for_status()
-            data = response.json()
+        search_prompt = (
+            f"Search for real practice problems or exercises about: {', '.join(topics)}. "
+            "Prefer university course notes and reputable educational sources: ocw.mit.edu, cs229.stanford.edu, "
+            "stanford.edu, cmu.edu, berkeley.edu, cornell.edu, scikit-learn.org, pytorch.org, tensorflow.org, "
+            "statquest.org, openstax.org, libretexts.org, tutorial.math.lamar.edu, khanacademy.org. "
+            "Avoid: chegg.com, coursehero.com, quizlet.com, bartleby.com, slader.com, "
+            "brainly.com, studocu.com, pinterest.com, reddit.com."
+        )
+        content = await _generate_problem_search_text(
+            prompt,
+            task="math_problem_batch_search",
+            max_tokens=max(6000, len(topics) * num_problems * 1400),
+            temperature=0.3,
+            search_prompt=search_prompt
+        )
+        try:
+            from services.llm_provider import extract_json_from_response as _extract_provider_json
+            parsed = _extract_provider_json(content)
+        except Exception:
+            parsed = await generate_json(
+                f"""Repair this intended JSON object of sourced practice problems grouped by topic.
+Return ONLY the JSON object. Keep only complete visible problem records and do not invent new problems.
 
-        content = data["choices"][0]["message"]["content"]
-        parsed = extract_json_from_response(content)
+{content[:24000]}""",
+                task="math_problem_batch_search_repair",
+                max_tokens=max(4096, len(topics) * num_problems * 1400),
+                temperature=0.0,
+            )
         topic_items = parsed.get("topics", []) if isinstance(parsed, dict) else []
 
         by_topic = {}
@@ -3247,7 +3543,7 @@ IMPORTANT:
                     p["source"] = inferred
                 elif _is_generic_source(p.get("source", "")):
                     p["source"] = ""
-            by_topic[name] = await _infer_problem_sources_with_llm(problems)
+            by_topic[name] = _filter_sourced_problems(await _infer_problem_sources_with_llm(problems))
 
         return by_topic
     except Exception as e:
@@ -3292,8 +3588,61 @@ def _is_generic_source(source: str) -> bool:
     return lower in {"source", "unknown", "generated", "educational source", "educational sources", "web"}
 
 
+def _is_valid_sourced_problem(problem: dict) -> bool:
+    source_url = (problem.get("source_url") or "").strip()
+    statement = (problem.get("problem") or "").strip()
+    if not source_url.startswith(("http://", "https://")):
+        return False
+    if len(statement) < 20:
+        return False
+
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(source_url).netloc.lower()
+    except Exception:
+        return False
+
+    blocked_domains = {
+        "chegg.com", "coursehero.com", "quizlet.com", "bartleby.com",
+        "slader.com", "brainly.com", "studocu.com", "pinterest.com",
+        "reddit.com"
+    }
+    if any(host == domain or host.endswith(f".{domain}") for domain in blocked_domains):
+        return False
+
+    return True
+
+
+def _filter_sourced_problems(problems: List[dict]) -> List[dict]:
+    filtered = []
+    for problem in problems or []:
+        if _is_valid_sourced_problem(problem):
+            filtered.append(problem)
+        else:
+            print(f"[LessonContent] Dropped unsourced/generated problem: {(problem.get('problem') or '')[:80]}")
+    return filtered
+
+
+def _normalize_problem_record(problem: dict) -> dict:
+    hints = problem.get("hints", [])
+    if isinstance(hints, str):
+        hints = [hints]
+    elif not isinstance(hints, list):
+        hints = []
+
+    return {
+        "problem": str(problem.get("problem") or problem.get("question") or "").strip(),
+        "hints": [str(h).strip() for h in hints if str(h).strip()],
+        "solution": str(problem.get("solution") or problem.get("explanation") or "").strip(),
+        "answer": str(problem.get("answer") or "").strip(),
+        "source": str(problem.get("source") or "Educational source").strip(),
+        "source_url": str(problem.get("source_url") or problem.get("url") or "").strip(),
+        "difficulty": str(problem.get("difficulty") or "medium").strip().lower(),
+    }
+
+
 async def _infer_problem_sources_with_llm(problems: List[dict]) -> List[dict]:
-    if not OPENROUTER_API_KEY or not problems:
+    if not problems:
         return problems
 
     items = []
@@ -3318,27 +3667,12 @@ Items:
 """
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://arxlearn.app",
-                    "X-Title": "arXlearn"
-                },
-                json={
-                    "model": DEFAULT_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.0,
-                    "max_tokens": 300
-                },
-                timeout=30.0
-            )
-            response.raise_for_status()
-            data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        parsed = extract_json_from_response(content)
+        parsed = await generate_json(
+            prompt,
+            task="problem_source_inference",
+            max_tokens=300,
+            temperature=0.0
+        )
         sources = {s.get("index"): s.get("source") for s in parsed.get("sources", [])}
         for idx, p in enumerate(problems):
             inferred = sources.get(idx)
@@ -3359,7 +3693,7 @@ async def _get_batched_problems(
     num_problems: int
 ) -> List[dict]:
     session_cache = PROBLEM_CACHE.setdefault(session_id, {})
-    if topic_name in session_cache:
+    if len(session_cache.get(topic_name, [])) >= num_problems:
         return session_cache[topic_name]
 
     # Normalize order_index for reliable comparisons
@@ -3376,7 +3710,7 @@ async def _get_batched_problems(
             start_index = -1
         if order_index_value is not None and start_index <= order_index_value < start_index + PROBLEM_BATCH_SIZE:
             problems_by_topic = batch.get("problems_by_topic", {})
-            if topic_name in problems_by_topic:
+            if len(problems_by_topic.get(topic_name, [])) >= num_problems:
                 session_cache[topic_name] = problems_by_topic.get(topic_name, [])
                 return session_cache[topic_name]
 
@@ -3421,10 +3755,32 @@ async def _get_batched_problems(
     if not batch_topics:
         batch_topics = [topic_name]
 
-    problems_by_topic = await scrape_math_problems_batch(batch_topics, num_problems)
-    problems = problems_by_topic.get(topic_name, [])
-    if not problems:
+    prefetch_limit = max(1, int(os.getenv("PROBLEM_PREFETCH_TOPICS", "1")))
+    batch_topics = batch_topics[:prefetch_limit]
+    if prefetch_limit <= 1:
         problems = await scrape_math_problems_from_sources(topic_name, num_problems)
+        if problems:
+            session_cache[topic_name] = problems
+        PROBLEM_BATCHES[session_id] = {
+            "start_index": order_index_value,
+            "problems_by_topic": {topic_name: problems}
+        }
+        return problems
+
+    batch_problem_count = 1 if len(batch_topics) > 1 else num_problems
+    problems_by_topic = await scrape_math_problems_batch(batch_topics, batch_problem_count)
+    problems = problems_by_topic.get(topic_name, [])
+    if len(problems) < num_problems:
+        extra_problems = await scrape_math_problems_from_sources(topic_name, num_problems - len(problems))
+        seen_urls = {p.get("source_url") for p in problems if p.get("source_url")}
+        for problem in extra_problems:
+            source_url = problem.get("source_url")
+            if not source_url or source_url not in seen_urls:
+                problems.append(problem)
+                if source_url:
+                    seen_urls.add(source_url)
+            if len(problems) >= num_problems:
+                break
 
     PROBLEM_BATCHES[session_id] = {
         "start_index": order_index_value,
@@ -3433,13 +3789,43 @@ async def _get_batched_problems(
 
     # Pre-fill cache for topics in this batch
     for name, probs in (problems_by_topic or {}).items():
-        if name:
+        if name and probs:
             session_cache[name] = probs
 
-    if topic_name not in session_cache:
+    if len(session_cache.get(topic_name, [])) < len(problems):
         session_cache[topic_name] = problems
 
     return session_cache[topic_name]
+
+
+async def _find_lesson_video(
+    aggregator: ContentAggregator,
+    topic_name: str,
+    user_background: List[str]
+) -> List:
+    """Find an embeddable lesson video with local YouTube first, then provider search."""
+    try:
+        video_results = await aggregator.search_youtube(topic_name, max_results=1)
+        if video_results:
+            return video_results
+    except Exception as e:
+        print(f"[LessonContent] YouTube search failed: {e}")
+
+    try:
+        search_result = await aggregator.search_content_for_topic(
+            topic=topic_name,
+            user_background=", ".join(user_background[:5]) if user_background else None,
+            content_types=[ContentType.VIDEO],
+            max_items=1
+        )
+        if search_result.success:
+            return search_result.items
+        if search_result.error:
+            print(f"[LessonContent] Video provider search failed: {search_result.error}")
+    except Exception as e:
+        print(f"[LessonContent] Video provider search failed: {e}")
+
+    return []
 
 
 @app.post("/api/lesson/content", response_model=LessonContentResponse)
@@ -3469,7 +3855,7 @@ async def get_lesson_content(request: LessonContentRequest):
         user_background = [n["label"] for n in knowledge_result.data if n.get("label")]
 
         # Create content aggregator for video search
-        aggregator = ContentAggregator(OPENROUTER_API_KEY, os.getenv("OPENALEX_API_KEY")) if OPENROUTER_API_KEY else None
+        aggregator = ContentAggregator(OPENROUTER_API_KEY, os.getenv("OPENALEX_API_KEY"))
 
         # Generate lesson text, fetch video, and scrape problems in parallel
         import asyncio
@@ -3478,37 +3864,48 @@ async def get_lesson_content(request: LessonContentRequest):
         problems_task = asyncio.create_task(
             _get_batched_problems(request.session_id, topic_name, order_index, 3)
         )
-        video_task = asyncio.create_task(aggregator.search_youtube(topic_name, max_results=1)) if aggregator else None
+        video_task = asyncio.create_task(_find_lesson_video(aggregator, topic_name, user_background)) if aggregator else None
 
-        # Wait for all with timeout (don't block indefinitely)
-        try:
-            tasks = [lesson_task, problems_task]
-            if video_task:
-                tasks.append(video_task)
-            
-            results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=45.0
-            )
-            
-            lesson_content = results[0] if not isinstance(results[0], Exception) else "Loading lesson content..."
-            raw_problems = results[1] if not isinstance(results[1], Exception) else []
-            video_results = results[2] if len(results) > 2 and not isinstance(results[2], Exception) else []
-        except asyncio.TimeoutError:
-            # Return partial content if we have it
-            lesson_content = "Loading lesson content..."
-            raw_problems = []
-            video_results = []
+        # Wait for all with timeout, but keep whichever pieces finished.
+        tasks_by_name = {"lesson": lesson_task, "problems": problems_task}
+        if video_task:
+            tasks_by_name["video"] = video_task
+
+        timeout_seconds = float(os.getenv("LESSON_CONTENT_TIMEOUT_SECONDS", "120"))
+        done, pending = await asyncio.wait(tasks_by_name.values(), timeout=timeout_seconds)
+        for task in pending:
+            task.cancel()
+
+        def _task_result(name: str, default):
+            task = tasks_by_name.get(name)
+            if not task or task not in done:
+                if task:
+                    print(f"[LessonContent] {name} generation timed out after {timeout_seconds}s")
+                return default
+            try:
+                return task.result()
+            except Exception as e:
+                print(f"[LessonContent] {name} generation failed: {e}")
+                return default
+
+        lesson_content = _task_result("lesson", "Loading lesson content...")
+        raw_problems = _task_result("problems", [])
+        video_results = _task_result("video", [])
 
         # Convert raw problems to MathProblem objects
         problems = []
         for p in raw_problems:
+            if not isinstance(p, dict):
+                continue
+            p = _normalize_problem_record(p)
+            if not p["problem"]:
+                continue
             problems.append(MathProblem(
                 problem=p.get("problem", ""),
                 hints=p.get("hints", []),
                 solution=p.get("solution", ""),
                 answer=p.get("answer", ""),
-                source=p.get("source", "Generated"),
+                source=p.get("source", "Educational source"),
                 source_url=p.get("source_url", ""),
                 difficulty=p.get("difficulty", "medium"),
                 latex_content=True
