@@ -15,7 +15,7 @@ LLM_PROVIDER=auto
 CLAUDE_MODEL=claude-sonnet-4-6
 CLAUDE_SEARCH_ENABLED=true
 PROBLEM_SEARCH_PROVIDER=openrouter
-PROBLEM_PREFETCH_TOPICS=1
+PROBLEM_PREFETCH_TOPICS=3
 # Optional fallbacks
 OPENROUTER_API_KEY=your-openrouter-key
 GEMINI_API_KEY=your-gemini-key
@@ -51,15 +51,13 @@ npm install
 
 ```bash
 # Terminal 1
-cd backend
-source .venv/bin/activate
-python3 main.py
-.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8001
-
+cd /home/briancatmaster/rev-learn-nexhacks/frontend
+VITE_API_URL=http://127.0.0.1:8001 npm run dev -- --host 127.0.0.1 --port 3001 --strictPort
 
 # Terminal 2
-cd frontend
-VITE_API_URL=http://localhost:8001 npm run dev -- --host 127.0.0.1 --port 3001
+cd /home/briancatmaster/rev-learn-nexhacks/backend
+source .venv/bin/activate
+python -m uvicorn main:app --host 127.0.0.1 --port 8001
 ```
 
 Frontend runs at `http://127.0.0.1:3001`, backend at `http://localhost:8001`.

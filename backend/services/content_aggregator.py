@@ -357,7 +357,7 @@ Return ONLY the JSON array, no other text."""
             search_url = "https://www.googleapis.com/youtube/v3/search"
             params = {
                 "part": "snippet",
-                "q": f"{topic} tutorial lecture",
+                "q": f"\"{topic}\" lecture tutorial educational",
                 "type": "video",
                 "maxResults": min(max_results * 3, 25),
                 "safeSearch": "moderate",
@@ -418,6 +418,13 @@ Return ONLY the JSON array, no other text."""
                 " in hindi", "hindi", "urdu", "telugu", "tamil", "bengali",
                 "marathi", "हिंदी", "हिन्दी"
             )
+            topic_tokens = {
+                token for token in re.split(r"[^a-z0-9]+", topic.lower())
+                if len(token) >= 4 and token not in {
+                    "model", "models", "architecture", "architectures",
+                    "intro", "introduction", "tutorial", "lecture"
+                }
+            }
             for item in items:
                 vid = item.get("id", {}).get("videoId")
                 if not vid:
@@ -426,6 +433,14 @@ Return ONLY the JSON array, no other text."""
                 details = details_by_id.get(vid, {})
                 title_lower = (details.get("title") or "").lower()
                 if any(marker in title_lower for marker in non_english_markers):
+                    continue
+                description_lower = (details.get("description") or "").lower()
+                haystack = f"{title_lower} {description_lower}"
+                title_hits = sum(1 for token in topic_tokens if token in title_lower)
+                all_hits = sum(1 for token in topic_tokens if token in haystack)
+                if topic_tokens and len(topic_tokens) > 1 and all_hits < min(2, len(topic_tokens)):
+                    continue
+                if topic_tokens and len(topic_tokens) == 1 and title_hits == 0 and all_hits < 1:
                     continue
 
                 duration = _parse_iso8601_duration(details.get("duration", ""))

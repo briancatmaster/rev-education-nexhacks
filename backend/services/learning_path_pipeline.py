@@ -168,13 +168,26 @@ class LearningPathPipeline:
         """Fetch all processed materials for the session."""
         # Fetch from academia_materials
         result = self.supabase.table("academia_materials").select(
-            "id, title, compressed_text, original_text, material_type, source_type, notes"
+            "id, title, compressed_text, original_text, material_type, source_type, notes, "
+            "compressed_storage_bucket, compressed_storage_path"
         ).eq("user_id", user_id).eq("session_id", session_id).execute()
 
         materials = []
         for row in result.data:
             # Prefer compressed text, fall back to original
             content = row.get("compressed_text") or row.get("original_text") or ""
+            if not content and row.get("compressed_storage_bucket") and row.get("compressed_storage_path"):
+                try:
+                    stored = self.supabase.storage.from_(
+                        row["compressed_storage_bucket"]
+                    ).download(row["compressed_storage_path"])
+                    if isinstance(stored, bytes):
+                        stored = stored.decode("utf-8")
+                    stored_content = json.loads(stored)
+                    content = stored_content.get("text") or stored_content.get("compressed_text") or ""
+                except Exception as e:
+                    print(f"[LearningPath] Failed to load stored material {row.get('id')}: {e}")
+
             if content:
                 materials.append({
                     "id": row["id"],

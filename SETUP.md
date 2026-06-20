@@ -35,7 +35,7 @@ LLM_PROVIDER=auto
 CLAUDE_MODEL=claude-sonnet-4-6
 CLAUDE_SEARCH_ENABLED=true
 PROBLEM_SEARCH_PROVIDER=openrouter
-PROBLEM_PREFETCH_TOPICS=1
+PROBLEM_PREFETCH_TOPICS=3
 
 # Optional fallbacks
 GEMINI_API_KEY=your-gemini-api-key
@@ -53,7 +53,7 @@ OPENROUTER_API_KEY=your-openrouter-api-key
 | `CLAUDE_MODEL` | Default: `claude-sonnet-4-6` |
 | `CLAUDE_SEARCH_ENABLED` | `true` when Anthropic web search is enabled in Console |
 | `PROBLEM_SEARCH_PROVIDER` | Use `openrouter` for real sourced practice problems; `auto`/`claude` can use Claude search |
-| `PROBLEM_PREFETCH_TOPICS` | Default `1` keeps problem search focused on the active topic |
+| `PROBLEM_PREFETCH_TOPICS` | Default `3` warms problem search for the active topic plus the next two |
 | `GEMINI_API_KEY` | Optional fallback from [Google AI Studio](https://aistudio.google.com/apikey) |
 | `OPENROUTER_API_KEY` | Optional fallback from OpenRouter |
 

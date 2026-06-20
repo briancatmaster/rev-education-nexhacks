@@ -1357,17 +1357,24 @@ async def submit_zotero_items(request: ZoteroItemsRequest):
 
             # Store in academia_materials table
             try:
+                publication_year = None
+                if item.date:
+                    year_match = re.search(r"\b(1[5-9]\d{2}|20\d{2}|21\d{2})\b", item.date)
+                    if year_match:
+                        publication_year = int(year_match.group(1))
+
                 supabase.table("academia_materials").insert({
                     "session_id": request.session_id,
                     "user_id": request.user_id,
                     "title": item.title,
                     "material_type": "paper_read",
-                    "source_type": "zotero",
-                    "external_id": item.key,
-                    "external_url": item.url or (f"https://doi.org/{item.DOI}" if item.DOI else None),
-                    "abstract_text": item.abstractNote,
+                    "source_type": "zotero_import",
+                    "doi": item.DOI,
+                    "url": item.url or (f"https://doi.org/{item.DOI}" if item.DOI else None),
+                    "notes": item.abstractNote,
                     "authors": item.creators,
-                    "publication_date": item.date,
+                    "publication_year": publication_year,
+                    "tags": ["zotero", item.key] if item.key else ["zotero"],
                     "is_processed": False  # No full text available from Zotero metadata
                 }).execute()
             except Exception as e:
@@ -3188,12 +3195,18 @@ async def _source_url_is_reachable(source_url: str) -> bool:
     if not source_url.startswith(("http://", "https://")):
         return False
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; arXlearn/1.0; +https://arxlearn.app)"
+    }
     try:
         async with httpx.AsyncClient(follow_redirects=True) as client:
+            response = None
             try:
-                response = await client.head(source_url, timeout=8.0)
+                response = await client.head(source_url, headers=headers, timeout=8.0)
             except Exception:
-                response = await client.get(source_url, timeout=12.0)
+                pass
+            if response is None or response.status_code in {403, 405} or response.status_code >= 400:
+                response = await client.get(source_url, headers=headers, timeout=12.0)
             return response.status_code < 400
     except Exception as e:
         print(f"[LessonContent] Problem source URL failed validation: {source_url} ({e})")
@@ -3219,6 +3232,7 @@ async def _filter_reachable_sourced_problems(problems: List[dict]) -> List[dict]
 
 
 async def _search_exercise_problem_fallback(topic: str, num_problems: int) -> List[dict]:
+    candidate_count = max(num_problems * 2, 5)
     prompt = f"""Find real online exercises, homework questions, lab tasks, notebook tasks, or assignment prompts for: "{topic}".
 
 Prioritize sources that explicitly contain exercises/labs/problem sets:
@@ -3248,7 +3262,7 @@ Rules:
 - Prefer source pages that contain the exercise/lab/assignment, not just background reading.
 - Do not use Chegg, CourseHero, Quizlet, Brainly, Studocu, Reddit, or answer farms.
 - If exact topic exercises are scarce, use closely related exercises that practice the prerequisite concepts.
-- Return up to {num_problems} items."""
+- Return up to {candidate_count} items so invalid or unreachable sources can be filtered out."""
 
     search_prompt = (
         f"Search for real exercises assignments homework labs notebooks problem sets about {topic}. "
@@ -3261,25 +3275,97 @@ Rules:
     content = await _generate_problem_search_text(
         prompt,
         task="exercise_problem_fallback",
-        max_tokens=max(6500, num_problems * 2200),
+        max_tokens=max(7000, candidate_count * 1600),
         temperature=0.25,
         search_prompt=search_prompt
     )
     problems = await _parse_problem_search_response(
         content,
         task="exercise_problem_fallback",
-        max_tokens=max(4096, num_problems * 2200)
+        max_tokens=max(4096, candidate_count * 1600)
     )
     problems = await _filter_reachable_sourced_problems(problems)
+    curated = _curated_source_problem_fallback(topic)
+    if curated:
+        combined = []
+        seen_urls = set()
+        for problem in curated + problems:
+            source_url = problem.get("source_url")
+            if source_url and source_url not in seen_urls:
+                combined.append(problem)
+                seen_urls.add(source_url)
+            if len(combined) >= num_problems:
+                break
+        return combined
+
     if len(problems) < num_problems:
         seen_urls = {p.get("source_url") for p in problems}
-        for problem in _curated_source_problem_fallback(topic):
+        for problem in await _search_source_grounded_question_fallback(topic, num_problems - len(problems)):
             if problem.get("source_url") not in seen_urls:
                 problems.append(problem)
                 seen_urls.add(problem.get("source_url"))
             if len(problems) >= num_problems:
                 break
+
     return problems
+
+
+async def _search_source_grounded_question_fallback(topic: str, num_problems: int) -> List[dict]:
+    candidate_count = max(num_problems * 2, 5)
+    prompt = f"""Find source-grounded practice questions for learning about: "{topic}".
+
+This may be a humanities, history, literature, social science, or research topic, so questions can be:
+- discussion questions
+- short-answer questions
+- document/source analysis prompts
+- compare/contrast prompts
+- thesis-building essay prompts
+
+Use reputable online sources such as university course pages, OpenStax, Khan Academy, OER Project,
+National Archives, Library of Congress, museum/encyclopedia education pages, or peer-reviewed/open academic sources.
+For example, history topics may use OpenStax or Khan Academy overview pages, Cold War topics may use
+history.state.gov or primary-source archives, and Renaissance topics may use Khan Academy/Smarthistory-style
+education pages. These are examples, not fixed sources; choose sources that match the requested topic.
+
+Return JSON only:
+[
+  {{
+    "problem": "A concrete learner-facing question or prompt grounded in the source",
+    "hints": ["Hint 1", "Hint 2"],
+    "solution": "A concise model answer or answer outline",
+    "answer": "Short final answer or thesis",
+    "source": "Source label",
+    "source_url": "https://...",
+    "difficulty": "easy/medium/hard"
+  }}
+]
+
+Rules:
+- Every item must include a real source_url.
+- Do not use answer farms, Reddit, Quizlet, CourseHero, Chegg, or Studocu.
+- Return up to {candidate_count} items so invalid or unreachable sources can be filtered out."""
+
+    search_prompt = (
+        f"Search for source-grounded discussion questions, short answer prompts, essay prompts, "
+        f"document analysis prompts, or educational source pages about {topic}. "
+        "Prefer university course pages, OpenStax, Khan Academy, OER Project, National Archives, "
+        "Library of Congress, museum education pages, Smarthistory, history.state.gov, and reputable academic sources. "
+        "For examples only: French Revolution can use OpenStax/Khan Academy, Cold War can use history.state.gov, "
+        "Renaissance humanism can use Khan Academy/Smarthistory. Avoid answer farms."
+    )
+    content = await _generate_problem_search_text(
+        prompt,
+        task="source_grounded_question_fallback",
+        max_tokens=max(6500, candidate_count * 1400),
+        temperature=0.25,
+        search_prompt=search_prompt
+    )
+    problems = await _parse_problem_search_response(
+        content,
+        task="source_grounded_question_fallback",
+        max_tokens=max(4096, candidate_count * 1400)
+    )
+    return await _filter_reachable_sourced_problems(problems)
 
 
 def _curated_source_problem_fallback(topic: str) -> List[dict]:
@@ -3616,6 +3702,9 @@ def _is_valid_sourced_problem(problem: dict) -> bool:
 def _filter_sourced_problems(problems: List[dict]) -> List[dict]:
     filtered = []
     for problem in problems or []:
+        if not isinstance(problem, dict):
+            continue
+        problem = _normalize_problem_record(problem)
         if _is_valid_sourced_problem(problem):
             filtered.append(problem)
         else:
@@ -3755,7 +3844,7 @@ async def _get_batched_problems(
     if not batch_topics:
         batch_topics = [topic_name]
 
-    prefetch_limit = max(1, int(os.getenv("PROBLEM_PREFETCH_TOPICS", "1")))
+    prefetch_limit = max(1, int(os.getenv("PROBLEM_PREFETCH_TOPICS", "3")))
     batch_topics = batch_topics[:prefetch_limit]
     if prefetch_limit <= 1:
         problems = await scrape_math_problems_from_sources(topic_name, num_problems)
@@ -3767,8 +3856,7 @@ async def _get_batched_problems(
         }
         return problems
 
-    batch_problem_count = 1 if len(batch_topics) > 1 else num_problems
-    problems_by_topic = await scrape_math_problems_batch(batch_topics, batch_problem_count)
+    problems_by_topic = await scrape_math_problems_batch(batch_topics, num_problems)
     problems = problems_by_topic.get(topic_name, [])
     if len(problems) < num_problems:
         extra_problems = await scrape_math_problems_from_sources(topic_name, num_problems - len(problems))
@@ -3864,7 +3952,10 @@ async def get_lesson_content(request: LessonContentRequest):
         problems_task = asyncio.create_task(
             _get_batched_problems(request.session_id, topic_name, order_index, 3)
         )
-        video_task = asyncio.create_task(_find_lesson_video(aggregator, topic_name, user_background)) if aggregator else None
+        video_timeout = float(os.getenv("LESSON_VIDEO_TIMEOUT_SECONDS", "20"))
+        video_task = asyncio.create_task(
+            asyncio.wait_for(_find_lesson_video(aggregator, topic_name, user_background), timeout=video_timeout)
+        ) if aggregator else None
 
         # Wait for all with timeout, but keep whichever pieces finished.
         tasks_by_name = {"lesson": lesson_task, "problems": problems_task}
